@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../config/app_constants.dart';
 import '../models/usuario_model.dart';
 import '../utils/validators.dart';
@@ -8,6 +9,8 @@ import '../utils/validators.dart';
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _firestore.collection('users');
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -53,14 +56,13 @@ class AuthService {
       intentosFallidos: 0,
       promedio: 5.0,
       favoresCompletados: 0,
+      favoresDevueltos: 0,
+      favoresPedidos: 0,
       objetosDevueltos: 0,
-      insignias: [],
+      insignias: ['novato_solidario'],
     );
 
-    await _firestore
-        .collection('usuarios')
-        .doc(user.uid)
-        .set(nuevoUsuario.toMap());
+    await _users.doc(user.uid).set(nuevoUsuario.toMap());
   }
 
   /// RF02: Inicio de sesión con correo y contraseña, control de intentos y bloqueo
@@ -77,15 +79,17 @@ class AuthService {
     }
 
     // 2. Buscar si el usuario ya existe en Firestore para chequear bloqueo previo
-    final userQuery = await _firestore
-        .collection('usuarios')
-        .where('correo', isEqualTo: emailClean)
+    final userQuery = await _users
+        .where('email', isEqualTo: emailClean)
         .limit(1)
         .get();
 
     DocumentSnapshot<Map<String, dynamic>>? userDoc;
     if (userQuery.docs.isNotEmpty) {
       userDoc = userQuery.docs.first;
+    }
+
+    if (userDoc != null) {
       final data = userDoc.data()!;
       final usuario = UsuarioModel.fromMap(data, userDoc.id);
 
@@ -111,19 +115,23 @@ class AuthService {
       await user.reload();
       final esVerificado = _auth.currentUser?.emailVerified ?? false;
 
-      // Obtener o refrescar el documento de perfil
-      final profileSnapshot = await _firestore.collection('usuarios').doc(user.uid).get();
+      // Obtener el documento de perfil en 'users'
+      final profileSnapshot = await _users.doc(user.uid).get();
       if (!profileSnapshot.exists) {
-        throw Exception('Perfil no encontrado en Firestore');
+        throw Exception(
+          'Perfil no encontrado en la colección users de Firestore',
+        );
       }
 
-      var usuarioActual = UsuarioModel.fromMap(profileSnapshot.data()!, user.uid);
+      final profileData = profileSnapshot.data();
+      if (profileData == null) {
+        throw Exception('El perfil del usuario está vacío en Firestore');
+      }
+      var usuarioActual = UsuarioModel.fromMap(profileData, user.uid);
 
       // Si el email fue verificado pero en Firestore sigue false, actualizarlo a true (RF01)
       if (esVerificado && !usuarioActual.verificado) {
-        await _firestore.collection('usuarios').doc(user.uid).update({
-          'verificado': true,
-        });
+        await _users.doc(user.uid).update({'verificado': true});
         usuarioActual = usuarioActual.copyWith(verificado: true);
       }
 
@@ -137,7 +145,7 @@ class AuthService {
       }
 
       // 5. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
-      await _firestore.collection('usuarios').doc(user.uid).update({
+      await _users.doc(user.uid).update({
         'intentosFallidos': 0,
         'bloqueadoHasta': null,
       });
@@ -147,7 +155,8 @@ class AuthService {
       // 6. Si la contraseña o credencial es incorrecta, registrar intento fallido (RF02)
       if (userDoc != null &&
           (e.code == 'wrong-password' || e.code == 'invalid-credential')) {
-        final currentAttempts = (userDoc.data()?['intentosFallidos'] as num?)?.toInt() ?? 0;
+        final currentAttempts =
+            (userDoc.data()?['intentosFallidos'] as num?)?.toInt() ?? 0;
         final nuevosIntentos = currentAttempts + 1;
 
         if (nuevosIntentos >= AppConstants.maxIntentosFallidos) {
@@ -163,9 +172,7 @@ class AuthService {
             'Tu cuenta ha sido bloqueada por 15 minutos.',
           );
         } else {
-          await userDoc.reference.update({
-            'intentosFallidos': nuevosIntentos,
-          });
+          await userDoc.reference.update({'intentosFallidos': nuevosIntentos});
           final restantes = AppConstants.maxIntentosFallidos - nuevosIntentos;
           throw Exception(
             'Contraseña incorrecta. Te quedan $restantes intento(s) antes del bloqueo.',
@@ -174,7 +181,9 @@ class AuthService {
       }
 
       if (e.code == 'user-not-found') {
-        throw Exception('No existe una cuenta registrada con este correo institucional.');
+        throw Exception(
+          'No existe una cuenta registrada con este correo institucional.',
+        );
       }
 
       throw Exception(e.message ?? 'Error al iniciar sesión');
@@ -182,11 +191,42 @@ class AuthService {
   }
 
   /// Reenviar enlace de verificación de correo (RF02)
-  Future<void> reenviarEnlaceVerificacion() async {
-    final user = _auth.currentUser;
-    if (user != null && !user.emailVerified) {
-      await user.sendEmailVerification();
+  Future<void> reenviarEnlaceVerificacion({
+    required String correo,
+    required String password,
+  }) async {
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: correo.trim().toLowerCase(),
+        password: password,
+      );
+      final user = userCredential.user;
+      if (user == null) {
+        throw Exception('No se pudo recuperar la cuenta de usuario');
+      }
+
+      await user.reload();
+      final refreshedUser = _auth.currentUser;
+      if (refreshedUser == null) {
+        throw Exception('No se pudo recuperar la cuenta de usuario');
+      }
+      if (refreshedUser.emailVerified) {
+        throw Exception(
+          'Este correo ya aparece verificado. Intenta iniciar sesión.',
+        );
+      }
+
+      await refreshedUser.sendEmailVerification();
+    } finally {
+      if (_auth.currentUser != null) {
+        await _auth.signOut();
+      }
     }
+  }
+
+  /// Enviar enlace para restablecer la contraseña.
+  Future<void> enviarEnlaceRecuperacion({required String correo}) async {
+    await _auth.sendPasswordResetEmail(email: correo.trim().toLowerCase());
   }
 
   /// Cerrar sesión
