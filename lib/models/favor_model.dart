@@ -45,8 +45,11 @@ class FavorModel {
 
   Map<String, dynamic> toMap() {
     return {
-      'idAutor': FirebaseFirestore.instance.collection('users').doc(idAutor),
+      'id': id,
+      'idAutor': idAutor,
+      'idAyudante': idAyudante,
       'nombreAutor': nombreAutor,
+      'tipo': tipoServicio,
       'tipoServicio': tipoServicio,
       'titulo': titulo,
       'descripcion': descripcion,
@@ -56,7 +59,9 @@ class FavorModel {
       'urlFotos': urlFotos,
       'fechaCreacion': Timestamp.fromDate(fechaCreacion),
       'soloLectura': soloLectura,
+      'yaAvisado': yaAvisado24h,
       'yaAvisado24h': yaAvisado24h,
+      'calificacionHabilitada': calificacionHabilitada,
     };
   }
 

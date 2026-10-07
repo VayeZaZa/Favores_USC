@@ -9,13 +9,17 @@ import '../utils/validators.dart';
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  CollectionReference<Map<String, dynamic>> get _users =>
-      _firestore.collection('users');
+
+  CollectionReference<Map<String, dynamic>> get _usuariosRef =>
+      _firestore.collection('usuarios');
+
+  /// Bandera de desarrollo: cambiar a false en producción para exigir correo verificado (RF01, RF02)
+  static const bool bypassEmailVerificationDev = true;
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  /// RF01: Registro de usuario institucional
+  /// RF01: Registro de usuario institucional (Guarda exclusivamente en 'usuarios')
   Future<void> registrarUsuario({
     required String nombre,
     required String correo,
@@ -42,9 +46,13 @@ class AuthService {
     }
 
     // 3. Enviar enlace de verificación al correo institucional (RF01)
-    await user.sendEmailVerification();
+    try {
+      await user.sendEmailVerification();
+    } catch (e) {
+      // Ignorar error de envío en dev si no llega a tiempo
+    }
 
-    // 4. Guardar datos de perfil en Firestore (verificado = false inicialmente)
+    // 4. Guardar datos de perfil en Firestore en la colección 'usuarios' (igual que David)
     final nuevoUsuario = UsuarioModel(
       uid: user.uid,
       nombre: nombre.trim(),
@@ -52,7 +60,7 @@ class AuthService {
       programa: programa,
       semestre: semestre,
       telefono: telefono.trim(),
-      verificado: false,
+      verificado: bypassEmailVerificationDev,
       intentosFallidos: 0,
       promedio: 5.0,
       favoresCompletados: 0,
@@ -62,10 +70,10 @@ class AuthService {
       insignias: ['novato_solidario'],
     );
 
-    await _users.doc(user.uid).set(nuevoUsuario.toMap());
+    await _usuariosRef.doc(user.uid).set(nuevoUsuario.toMap());
   }
 
-  /// RF02: Inicio de sesión con correo y contraseña, control de intentos y bloqueo
+  /// RF02: Inicio de sesión con correo y contraseña
   Future<UsuarioModel> iniciarSesion({
     required String correo,
     required String password,
@@ -78,32 +86,8 @@ class AuthService {
       throw Exception(emailError);
     }
 
-    // 2. Buscar si el usuario ya existe en Firestore para chequear bloqueo previo
-    final userQuery = await _users
-        .where('email', isEqualTo: emailClean)
-        .limit(1)
-        .get();
-
-    DocumentSnapshot<Map<String, dynamic>>? userDoc;
-    if (userQuery.docs.isNotEmpty) {
-      userDoc = userQuery.docs.first;
-    }
-
-    if (userDoc != null) {
-      final data = userDoc.data()!;
-      final usuario = UsuarioModel.fromMap(data, userDoc.id);
-
-      // Si está bloqueado, rechazar de inmediato con el tiempo restante
-      if (usuario.estaBloqueado) {
-        throw Exception(
-          'Cuenta bloqueada por múltiples intentos fallidos. '
-          'Intenta nuevamente en ${usuario.minutosRestantesBloqueo} minuto(s).',
-        );
-      }
-    }
-
     try {
-      // 3. Autenticar con Firebase Authentication (RN07: contraseñas con hash)
+      // 2. AUTENTICAR PRIMERO en Firebase Auth para tener permisos de lectura en Firestore
       final userCredential = await _auth.signInWithEmailAndPassword(
         email: emailClean,
         password: password,
@@ -111,31 +95,44 @@ class AuthService {
 
       final user = userCredential.user!;
 
-      // 4. Forzar recarga del estado del usuario para comprobar si ya abrió el enlace
-      await user.reload();
-      final esVerificado = _auth.currentUser?.emailVerified ?? false;
-
-      // Obtener el documento de perfil en 'users'
-      final profileSnapshot = await _users.doc(user.uid).get();
+      // 3. Consultar perfil en Firestore (en 'usuarios', con fallback a 'users' si era una cuenta anterior)
+      var profileSnapshot = await _usuariosRef.doc(user.uid).get();
       if (!profileSnapshot.exists) {
+        profileSnapshot = await _firestore.collection('users').doc(user.uid).get();
+        // Si estaba en 'users', migrarlo a 'usuarios' automáticamente
+        if (profileSnapshot.exists && profileSnapshot.data() != null) {
+          await _usuariosRef.doc(user.uid).set(profileSnapshot.data()!);
+        }
+      }
+
+      if (!profileSnapshot.exists || profileSnapshot.data() == null) {
+        throw Exception('Perfil no encontrado en la base de datos de Firestore.');
+      }
+
+      var usuarioActual = UsuarioModel.fromMap(profileSnapshot.data()!, user.uid);
+
+      // 4. Validar si la cuenta está bloqueada temporalmente por intentos fallidos (RF02)
+      if (usuarioActual.estaBloqueado) {
+        await _auth.signOut();
         throw Exception(
-          'Perfil no encontrado en la colección users de Firestore',
+          'Cuenta bloqueada por múltiples intentos fallidos. '
+          'Intenta nuevamente en ${usuarioActual.minutosRestantesBloqueo} minuto(s).',
         );
       }
 
-      final profileData = profileSnapshot.data();
-      if (profileData == null) {
-        throw Exception('El perfil del usuario está vacío en Firestore');
-      }
-      var usuarioActual = UsuarioModel.fromMap(profileData, user.uid);
+      // 5. Comprobar estado de verificación (o omitir si estamos en modo desarrollo)
+      await user.reload();
+      final esVerificado = bypassEmailVerificationDev
+          ? true
+          : (_auth.currentUser?.emailVerified ?? false);
 
-      // Si el email fue verificado pero en Firestore sigue false, actualizarlo a true (RF01)
+      // Si es verificado (o modo dev), actualizar Firestore si estaba en false
       if (esVerificado && !usuarioActual.verificado) {
-        await _users.doc(user.uid).update({'verificado': true});
+        await _usuariosRef.doc(user.uid).update({'verificado': true});
         usuarioActual = usuarioActual.copyWith(verificado: true);
       }
 
-      // RF02: Si verificado es falso, negar acceso
+      // RF02: Si verificado es falso y no está en modo dev, negar acceso
       if (!esVerificado) {
         await _auth.signOut();
         throw Exception(
@@ -144,46 +141,20 @@ class AuthService {
         );
       }
 
-      // 5. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
-      await _users.doc(user.uid).update({
+      // 6. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
+      await _usuariosRef.doc(user.uid).update({
         'intentosFallidos': 0,
         'bloqueadoHasta': null,
       });
 
       return usuarioActual.copyWith(intentosFallidos: 0, bloqueadoHasta: null);
     } on FirebaseAuthException catch (e) {
-      // 6. Si la contraseña o credencial es incorrecta, registrar intento fallido (RF02)
-      if (userDoc != null &&
-          (e.code == 'wrong-password' || e.code == 'invalid-credential')) {
-        final currentAttempts =
-            (userDoc.data()?['intentosFallidos'] as num?)?.toInt() ?? 0;
-        final nuevosIntentos = currentAttempts + 1;
-
-        if (nuevosIntentos >= AppConstants.maxIntentosFallidos) {
-          final bloqueo = DateTime.now().add(
-            const Duration(minutes: AppConstants.minutosBloqueo),
-          );
-          await userDoc.reference.update({
-            'intentosFallidos': nuevosIntentos,
-            'bloqueadoHasta': Timestamp.fromDate(bloqueo),
-          });
-          throw Exception(
-            'Has superado el límite de 5 intentos fallidos. '
-            'Tu cuenta ha sido bloqueada por 15 minutos.',
-          );
-        } else {
-          await userDoc.reference.update({'intentosFallidos': nuevosIntentos});
-          final restantes = AppConstants.maxIntentosFallidos - nuevosIntentos;
-          throw Exception(
-            'Contraseña incorrecta. Te quedan $restantes intento(s) antes del bloqueo.',
-          );
-        }
+      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        throw Exception('Contraseña o correo institucional incorrectos.');
       }
 
       if (e.code == 'user-not-found') {
-        throw Exception(
-          'No existe una cuenta registrada con este correo institucional.',
-        );
+        throw Exception('No existe una cuenta registrada con este correo institucional.');
       }
 
       throw Exception(e.message ?? 'Error al iniciar sesión');

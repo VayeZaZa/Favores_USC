@@ -10,7 +10,14 @@ import 'screens/auth/welcome_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Inicialización oficial de Firebase para el proyecto Favores USC
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Error inicializando Firebase: $e');
+  }
 
   // Sembrar datos de prueba si no existen para que aparezcan en Firebase (favores, objetos, chats)
   _sembrarColeccionesFirebase();

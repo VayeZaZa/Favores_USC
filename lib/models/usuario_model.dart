@@ -52,8 +52,12 @@ class UsuarioModel {
 
   Map<String, dynamic> toMap() {
     return {
+      'uid': uid,
+      'nombre': nombre,
       'display_name': nombre,
+      'correo': correo,
       'email': correo,
+      'telefono': telefono,
       'phone_number': telefono,
       'programa': programa,
       'semestre': semestre,
@@ -67,6 +71,7 @@ class UsuarioModel {
       'favoresDevueltos': favoresDevueltos,
       'favoresPedidos': favoresPedidos,
       'objetosDevueltos': objetosDevueltos,
+      'promedio': promedio,
       'promedioCalificacion': promedio,
       'insignias': insignias,
     };
