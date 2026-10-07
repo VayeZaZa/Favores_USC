@@ -18,7 +18,7 @@ class ChatModel {
   final String ultimoMensaje;
 
   Map<String, dynamic> toMap() {
-    final users = FirebaseFirestore.instance.collection('users');
+    final users = FirebaseFirestore.instance.collection('usuarios');
     return {
       'idReferencia': idReferencia,
       'participantes': participantes.map(users.doc).toList(),

@@ -95,15 +95,8 @@ class AuthService {
 
       final user = userCredential.user!;
 
-      // 3. Consultar perfil en Firestore (en 'usuarios', con fallback a 'users' si era una cuenta anterior)
-      var profileSnapshot = await _usuariosRef.doc(user.uid).get();
-      if (!profileSnapshot.exists) {
-        profileSnapshot = await _firestore.collection('users').doc(user.uid).get();
-        // Si estaba en 'users', migrarlo a 'usuarios' automáticamente
-        if (profileSnapshot.exists && profileSnapshot.data() != null) {
-          await _usuariosRef.doc(user.uid).set(profileSnapshot.data()!);
-        }
-      }
+      // 3. Consultar perfil en Firestore únicamente en la colección 'usuarios'
+      final profileSnapshot = await _usuariosRef.doc(user.uid).get();
 
       if (!profileSnapshot.exists || profileSnapshot.data() == null) {
         throw Exception('Perfil no encontrado en la base de datos de Firestore.');
@@ -142,10 +135,23 @@ class AuthService {
       }
 
       // 6. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
-      await _usuariosRef.doc(user.uid).update({
+      final datosActualizar = <String, dynamic>{
         'intentosFallidos': 0,
         'bloqueadoHasta': null,
-      });
+      };
+
+      // Si no tiene la insignia 'novato_solidario', asignarla y actualizarla en Firestore
+      if (usuarioActual.insignias.isEmpty ||
+          !usuarioActual.insignias.contains('novato_solidario')) {
+        final nuevasInsignias = List<String>.from(usuarioActual.insignias);
+        if (!nuevasInsignias.contains('novato_solidario')) {
+          nuevasInsignias.add('novato_solidario');
+        }
+        datosActualizar['insignias'] = nuevasInsignias;
+        usuarioActual = usuarioActual.copyWith(insignias: nuevasInsignias);
+      }
+
+      await _usuariosRef.doc(user.uid).update(datosActualizar);
 
       return usuarioActual.copyWith(intentosFallidos: 0, bloqueadoHasta: null);
     } on FirebaseAuthException catch (e) {

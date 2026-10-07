@@ -35,7 +35,7 @@ class UsuarioModel {
     this.favoresPedidos = 0,
     this.objetosDevueltos = 0,
     this.promedio = 5.0,
-    this.insignias = const [],
+    this.insignias = const ['novato_solidario'],
   });
 
   /// Verifica si el usuario está actualmente bloqueado por intentos fallidos (RF02)
@@ -73,17 +73,20 @@ class UsuarioModel {
       'objetosDevueltos': objetosDevueltos,
       'promedio': promedio,
       'promedioCalificacion': promedio,
-      'insignias': insignias,
+      'insignias': insignias.isEmpty ? const ['novato_solidario'] : insignias,
     };
   }
 
   factory UsuarioModel.fromMap(Map<String, dynamic> map, String id) {
     final rawInsignias = map['insignias'];
-    final insignias = rawInsignias is List
+    var insignias = rawInsignias is List
         ? List<String>.from(rawInsignias)
         : rawInsignias is String
         ? [rawInsignias]
         : <String>[];
+    if (insignias.isEmpty) {
+      insignias = const ['novato_solidario'];
+    }
     final rawBloqueadoHasta = map['bloqueadoHasta'];
 
     return UsuarioModel(

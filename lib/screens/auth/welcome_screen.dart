@@ -41,10 +41,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   final _pageController = PageController();
   Timer? _slideTimer;
-  Timer? _loadingTimer;
   int _currentPage = 0;
-  int _activeLoadingDot = 0;
-  bool _isPageLoading = false;
   bool _imagesPrecached = false;
 
   @override
@@ -60,12 +57,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Auto-avance decorativo cada 5 segundos
     _slideTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!_pageController.hasClients) return;
       final nextPage = (_currentPage + 1) % _slides.length;
       _pageController.animateToPage(
         nextPage,
-        duration: const Duration(milliseconds: 450),
+        duration: const Duration(milliseconds: 600),
         curve: Curves.easeInOut,
       );
     });
@@ -74,52 +72,19 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void dispose() {
     _slideTimer?.cancel();
-    _loadingTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
 
   void _onPageChanged(int page) {
-    _loadingTimer?.cancel();
     setState(() {
       _currentPage = page;
-      _activeLoadingDot = 0;
-      _isPageLoading = true;
-    });
-
-    var loadingTicks = 0;
-    _loadingTimer = Timer.periodic(const Duration(milliseconds: 180), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      loadingTicks++;
-      if (loadingTicks >= 4) {
-        timer.cancel();
-        setState(() => _isPageLoading = false);
-        return;
-      }
-      setState(() {
-        _activeLoadingDot = (_activeLoadingDot + 1) % 3;
-      });
     });
   }
 
   void _openLogin() {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const LoginScreen()));
-  }
-
-  void _goToNextPage() {
-    if (_currentPage == _slides.length - 1) {
-      _openLogin();
-      return;
-    }
-
-    _pageController.nextPage(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-    );
   }
 
   void _goToPage(int page) {
@@ -137,6 +102,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // Slide interactivo (se puede arrastrar con el dedo y se mueve solo cada 5s)
           PageView.builder(
             controller: _pageController,
             itemCount: _slides.length,
@@ -147,40 +113,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               alignment: Alignment.center,
             ),
           ),
-          if (_isPageLoading)
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 17,
-                  vertical: 13,
-                ),
-                decoration: BoxDecoration(
-                  color: _navy.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.28),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(
-                    3,
-                    (index) => AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: _activeLoadingDot == index
-                            ? _gold
-                            : Colors.white.withValues(alpha: 0.55),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(28, 12, 28, 8),
@@ -210,6 +142,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   const SizedBox(height: 22),
                   _WelcomeSlideText(slide: _slides[_currentPage]),
                   const Spacer(),
+                  // Indicadores de puntos interactivos
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
@@ -228,11 +161,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  // Botón "Comenzar" fijo siempre visible que redirige de una vez
                   SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: _goToNextPage,
+                      onPressed: _openLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _gold,
                         foregroundColor: _navy,
@@ -244,16 +178,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      child: Row(
+                      child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            _currentPage == _slides.length - 1
-                                ? 'Comenzar'
-                                : 'Siguiente',
-                          ),
-                          const SizedBox(width: 10),
-                          const Icon(Icons.arrow_forward_rounded, size: 20),
+                          Text('Comenzar'),
+                          SizedBox(width: 10),
+                          Icon(Icons.arrow_forward_rounded, size: 20),
                         ],
                       ),
                     ),

@@ -24,7 +24,7 @@ class ObjetoModel {
       'descripcion': descripcion,
       'estadoActual': estadoActual,
       'fechaReporte': Timestamp.fromDate(fechaReporte),
-      'idDueno': FirebaseFirestore.instance.collection('users').doc(idDueno),
+      'idDueno': FirebaseFirestore.instance.collection('usuarios').doc(idDueno),
       'tipo': tipo,
       'titulo': titulo,
     };

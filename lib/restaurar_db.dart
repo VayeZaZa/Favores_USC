@@ -12,23 +12,23 @@ void main() async {
   final db = FirebaseFirestore.instance;
   print('Inicializando colecciones base en Firestore...');
 
-  // 1. users
-  await db.collection('users').doc('ejemplo_usuario').set({
-    'display_name': 'Valeria Yance',
-    'email': 'valeria.yance00@usc.edu.co',
-    'phone_number': '3101234567',
+  // 1. usuarios
+  await db.collection('usuarios').doc('ejemplo_usuario').set({
+    'nombre': 'Valeria Yance',
+    'correo': 'valeria.yance00@usc.edu.co',
+    'telefono': '3101234567',
     'programa': 'Ingeniería de Sistemas',
     'semestre': 6,
-    'verificado': false,
+    'verificado': true,
     'intentosFallidos': 0,
-    'promedioCalificacion': 5.0,
+    'promedio': 5.0,
     'favoresCompletados': 0,
     'favoresPedidos': 0,
     'objetosDevueltos': 0,
     'insignias': ['novato_solidario'],
     'created_time': FieldValue.serverTimestamp(),
   });
-  print('Coleccion users creada.');
+  print('Coleccion usuarios creada.');
 
   // 2. favores
   await db.collection('favores').doc('ejemplo_favor').set({
@@ -39,7 +39,7 @@ void main() async {
     'pago': 2000,
     'estado': 'Publicado',
     'nombreAutor': 'Valeria Yance',
-    'idAutor': db.collection('users').doc('ejemplo_usuario'),
+    'idAutor': 'ejemplo_usuario',
     'urlFotos': <String>[],
     'fechaCreacion': FieldValue.serverTimestamp(),
     'soloLectura': false,
@@ -56,7 +56,7 @@ void main() async {
     'descripcion': 'Dejada en una banca cerca a la cafetería',
     'lugarCampus': 'Bloque 6 - Cafetería Central / Plazoleta',
     'urlFoto': '',
-    'idDueno': db.collection('users').doc('ejemplo_usuario'),
+    'idDueno': 'ejemplo_usuario',
     'nombreDueno': 'Valeria Yance',
     'estadoActual': 'Publicado',
     'fechaReporte': FieldValue.serverTimestamp(),
@@ -69,7 +69,7 @@ void main() async {
     'idReferencia': 'ejemplo_favor',
     'tipoReferencia': 'FAVOR',
     'participantes': [
-      db.collection('users').doc('ejemplo_usuario'),
+      db.collection('usuarios').doc('ejemplo_usuario'),
     ],
     'ultimoMensaje': 'Hola, te puedo colaborar con el favor.',
     'ultimaFecha': FieldValue.serverTimestamp(),
@@ -79,7 +79,7 @@ void main() async {
   await chatRef.collection('mensajes').doc('ejemplo_mensaje').set({
     'texto': 'Hola, te puedo colaborar con el favor.',
     'fechaHora': FieldValue.serverTimestamp(),
-    'idEmisor': db.collection('users').doc('ejemplo_usuario'),
+    'idEmisor': db.collection('usuarios').doc('ejemplo_usuario'),
   });
   print('Coleccion chats y mensajes creada.');
 
