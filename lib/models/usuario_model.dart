@@ -13,6 +13,8 @@ class UsuarioModel {
   final DateTime? bloqueadoHasta; // RF02: 15 min de bloqueo si llega a 5
   final String? tokenFCM; // RF06: notificaciones push
   final int favoresCompletados; // RF14, RF15
+  final int favoresDevueltos;
+  final int favoresPedidos;
   final int objetosDevueltos; // RF14, RF15
   final double promedio; // RF09, RF15: calificación promedio (1.0 a 5.0)
   final List<String> insignias; // RF14: lista de insignias obtenidas
@@ -29,9 +31,11 @@ class UsuarioModel {
     this.bloqueadoHasta,
     this.tokenFCM,
     this.favoresCompletados = 0,
+    this.favoresDevueltos = 0,
+    this.favoresPedidos = 0,
     this.objetosDevueltos = 0,
     this.promedio = 5.0,
-    this.insignias = const [],
+    this.insignias = const ['novato_solidario'],
   });
 
   /// Verifica si el usuario está actualmente bloqueado por intentos fallidos (RF02)
@@ -50,39 +54,64 @@ class UsuarioModel {
     return {
       'uid': uid,
       'nombre': nombre,
+      'display_name': nombre,
       'correo': correo,
+      'email': correo,
+      'telefono': telefono,
+      'phone_number': telefono,
       'programa': programa,
       'semestre': semestre,
-      'telefono': telefono,
       'verificado': verificado,
       'intentosFallidos': intentosFallidos,
-      'bloqueadoHasta': bloqueadoHasta != null ? Timestamp.fromDate(bloqueadoHasta!) : null,
+      'bloqueadoHasta': bloqueadoHasta != null
+          ? Timestamp.fromDate(bloqueadoHasta!)
+          : null,
       'tokenFCM': tokenFCM,
       'favoresCompletados': favoresCompletados,
+      'favoresDevueltos': favoresDevueltos,
+      'favoresPedidos': favoresPedidos,
       'objetosDevueltos': objetosDevueltos,
       'promedio': promedio,
-      'insignias': insignias,
+      'promedioCalificacion': promedio,
+      'insignias': insignias.isEmpty ? const ['novato_solidario'] : insignias,
     };
   }
 
   factory UsuarioModel.fromMap(Map<String, dynamic> map, String id) {
+    final rawInsignias = map['insignias'];
+    var insignias = rawInsignias is List
+        ? List<String>.from(rawInsignias)
+        : rawInsignias is String
+        ? [rawInsignias]
+        : <String>[];
+    if (insignias.isEmpty) {
+      insignias = const ['novato_solidario'];
+    }
+    final rawBloqueadoHasta = map['bloqueadoHasta'];
+
     return UsuarioModel(
       uid: id,
-      nombre: map['nombre'] ?? '',
-      correo: map['correo'] ?? '',
+      nombre: map['display_name'] ?? map['nombre'] ?? '',
+      correo: map['email'] ?? map['correo'] ?? '',
       programa: map['programa'] ?? '',
       semestre: (map['semestre'] as num?)?.toInt() ?? 1,
-      telefono: map['telefono'] ?? '',
+      telefono: map['phone_number'] ?? map['telefono'] ?? '',
       verificado: map['verificado'] ?? false,
       intentosFallidos: (map['intentosFallidos'] as num?)?.toInt() ?? 0,
-      bloqueadoHasta: map['bloqueadoHasta'] != null
-          ? (map['bloqueadoHasta'] as Timestamp).toDate()
+      bloqueadoHasta: rawBloqueadoHasta is Timestamp
+          ? rawBloqueadoHasta.toDate()
+          : rawBloqueadoHasta is DateTime
+          ? rawBloqueadoHasta
           : null,
       tokenFCM: map['tokenFCM'],
       favoresCompletados: (map['favoresCompletados'] as num?)?.toInt() ?? 0,
+      favoresDevueltos: (map['favoresDevueltos'] as num?)?.toInt() ?? 0,
+      favoresPedidos: (map['favoresPedidos'] as num?)?.toInt() ?? 0,
       objetosDevueltos: (map['objetosDevueltos'] as num?)?.toInt() ?? 0,
-      promedio: (map['promedio'] as num?)?.toDouble() ?? 5.0,
-      insignias: List<String>.from(map['insignias'] ?? []),
+      promedio: (map['promedioCalificacion'] as num?)?.toDouble()
+          ?? (map['promedio'] as num?)?.toDouble()
+          ?? 5.0,
+      insignias: insignias,
     );
   }
 
@@ -97,6 +126,8 @@ class UsuarioModel {
     DateTime? bloqueadoHasta,
     String? tokenFCM,
     int? favoresCompletados,
+    int? favoresDevueltos,
+    int? favoresPedidos,
     int? objetosDevueltos,
     double? promedio,
     List<String>? insignias,
@@ -113,6 +144,8 @@ class UsuarioModel {
       bloqueadoHasta: bloqueadoHasta ?? this.bloqueadoHasta,
       tokenFCM: tokenFCM ?? this.tokenFCM,
       favoresCompletados: favoresCompletados ?? this.favoresCompletados,
+      favoresDevueltos: favoresDevueltos ?? this.favoresDevueltos,
+      favoresPedidos: favoresPedidos ?? this.favoresPedidos,
       objetosDevueltos: objetosDevueltos ?? this.objetosDevueltos,
       promedio: promedio ?? this.promedio,
       insignias: insignias ?? this.insignias,
