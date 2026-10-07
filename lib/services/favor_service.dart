@@ -29,6 +29,7 @@ class FavorService {
   /// Publica un nuevo favor tras validar los datos de negocio
   Future<String> crearFavor({
     required String idAutor,
+    required String titulo,
     required String tipo,
     required String descripcion,
     required String ubicacion,
@@ -65,14 +66,15 @@ class FavorService {
     final favor = FavorModel(
       id: newDoc.id,
       idAutor: idAutor,
-      tipo: tipo,
+      tipoServicio: tipo,
+      titulo: titulo,
       descripcion: descripcion,
       ubicacion: ubicacion,
       pago: pago,
       estado: 'Publicado',
       urlFotos: urlFotos,
       fechaCreacion: DateTime.now(),
-      yaAvisado: false,
+      yaAvisado24h: false,
       calificacionHabilitada: false,
     );
 

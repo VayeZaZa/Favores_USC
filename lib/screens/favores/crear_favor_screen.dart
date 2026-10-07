@@ -98,8 +98,9 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
       final favorService = ref.read(favorServiceProvider);
       await favorService.crearFavor(
         idAutor: currentUser.uid,
+        titulo: _tituloController.text.trim(),
         tipo: _tipoSeleccionado,
-        descripcion: descripcionCompleta,
+        descripcion: _descripcionController.text.trim(),
         ubicacion: _ubicacionSeleccionada!,
         pago: pago,
         imagenesLocales: _imagenesSeleccionadas,

@@ -46,6 +46,7 @@ class DefaultFirebaseOptions {
     appId: '1:491546356558:android:c6940a4fde47b6c6f5cc1f',
     messagingSenderId: '491546356558',
     projectId: 'favores-u-s-c-r4lrye',
+    databaseURL: 'https://favores-u-s-c-r4lrye-default-rtdb.firebaseio.com',
     storageBucket: 'favores-u-s-c-r4lrye.firebasestorage.app',
   );
 

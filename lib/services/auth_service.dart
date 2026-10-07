@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../config/app_constants.dart';
 import '../models/usuario_model.dart';
 import '../utils/validators.dart';
@@ -9,13 +10,16 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  CollectionReference<Map<String, dynamic>> get _usuariosRef =>
+      _firestore.collection('usuarios');
+
   /// Bandera de desarrollo: cambiar a false en producción para exigir correo verificado (RF01, RF02)
   static const bool bypassEmailVerificationDev = true;
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  /// RF01: Registro de usuario institucional
+  /// RF01: Registro de usuario institucional (Guarda exclusivamente en 'usuarios')
   Future<void> registrarUsuario({
     required String nombre,
     required String correo,
@@ -48,7 +52,7 @@ class AuthService {
       // Ignorar error de envío en dev si no llega a tiempo
     }
 
-    // 4. Guardar datos de perfil en Firestore (verificado = true si bypassEmailVerificationDev)
+    // 4. Guardar datos de perfil en Firestore en la colección 'usuarios' (igual que David)
     final nuevoUsuario = UsuarioModel(
       uid: user.uid,
       nombre: nombre.trim(),
@@ -60,17 +64,16 @@ class AuthService {
       intentosFallidos: 0,
       promedio: 5.0,
       favoresCompletados: 0,
+      favoresDevueltos: 0,
+      favoresPedidos: 0,
       objetosDevueltos: 0,
-      insignias: [],
+      insignias: ['novato_solidario'],
     );
 
-    await _firestore
-        .collection('usuarios')
-        .doc(user.uid)
-        .set(nuevoUsuario.toMap());
+    await _usuariosRef.doc(user.uid).set(nuevoUsuario.toMap());
   }
 
-  /// RF02: Inicio de sesión con correo y contraseña, control de intentos y bloqueo
+  /// RF02: Inicio de sesión con correo y contraseña
   Future<UsuarioModel> iniciarSesion({
     required String correo,
     required String password,
@@ -84,7 +87,7 @@ class AuthService {
     }
 
     try {
-      // 2. Autenticar PRIMERO con Firebase Authentication para obtener permisos en Firestore
+      // 2. AUTENTICAR PRIMERO en Firebase Auth para tener permisos de lectura en Firestore
       final userCredential = await _auth.signInWithEmailAndPassword(
         email: emailClean,
         password: password,
@@ -92,15 +95,16 @@ class AuthService {
 
       final user = userCredential.user!;
 
-      // 3. Consultar el documento del usuario autenticado en Firestore
-      final profileSnapshot = await _firestore.collection('usuarios').doc(user.uid).get();
-      if (!profileSnapshot.exists) {
+      // 3. Consultar perfil en Firestore únicamente en la colección 'usuarios'
+      final profileSnapshot = await _usuariosRef.doc(user.uid).get();
+
+      if (!profileSnapshot.exists || profileSnapshot.data() == null) {
         throw Exception('Perfil no encontrado en la base de datos de Firestore.');
       }
 
       var usuarioActual = UsuarioModel.fromMap(profileSnapshot.data()!, user.uid);
 
-      // Si la cuenta está bloqueada temporalmente por intentos fallidos (RF02)
+      // 4. Validar si la cuenta está bloqueada temporalmente por intentos fallidos (RF02)
       if (usuarioActual.estaBloqueado) {
         await _auth.signOut();
         throw Exception(
@@ -109,7 +113,7 @@ class AuthService {
         );
       }
 
-      // 4. Comprobar estado de verificación (o omitir si estamos en modo desarrollo)
+      // 5. Comprobar estado de verificación (o omitir si estamos en modo desarrollo)
       await user.reload();
       final esVerificado = bypassEmailVerificationDev
           ? true
@@ -117,9 +121,7 @@ class AuthService {
 
       // Si es verificado (o modo dev), actualizar Firestore si estaba en false
       if (esVerificado && !usuarioActual.verificado) {
-        await _firestore.collection('usuarios').doc(user.uid).update({
-          'verificado': true,
-        });
+        await _usuariosRef.doc(user.uid).update({'verificado': true});
         usuarioActual = usuarioActual.copyWith(verificado: true);
       }
 
@@ -132,11 +134,24 @@ class AuthService {
         );
       }
 
-      // 5. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
-      await _firestore.collection('usuarios').doc(user.uid).update({
+      // 6. Inicio exitoso: reiniciar intentosFallidos a 0 y limpiar bloqueo (RF02)
+      final datosActualizar = <String, dynamic>{
         'intentosFallidos': 0,
         'bloqueadoHasta': null,
-      });
+      };
+
+      // Si no tiene la insignia 'novato_solidario', asignarla y actualizarla en Firestore
+      if (usuarioActual.insignias.isEmpty ||
+          !usuarioActual.insignias.contains('novato_solidario')) {
+        final nuevasInsignias = List<String>.from(usuarioActual.insignias);
+        if (!nuevasInsignias.contains('novato_solidario')) {
+          nuevasInsignias.add('novato_solidario');
+        }
+        datosActualizar['insignias'] = nuevasInsignias;
+        usuarioActual = usuarioActual.copyWith(insignias: nuevasInsignias);
+      }
+
+      await _usuariosRef.doc(user.uid).update(datosActualizar);
 
       return usuarioActual.copyWith(intentosFallidos: 0, bloqueadoHasta: null);
     } on FirebaseAuthException catch (e) {
@@ -153,11 +168,42 @@ class AuthService {
   }
 
   /// Reenviar enlace de verificación de correo (RF02)
-  Future<void> reenviarEnlaceVerificacion() async {
-    final user = _auth.currentUser;
-    if (user != null && !user.emailVerified) {
-      await user.sendEmailVerification();
+  Future<void> reenviarEnlaceVerificacion({
+    required String correo,
+    required String password,
+  }) async {
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: correo.trim().toLowerCase(),
+        password: password,
+      );
+      final user = userCredential.user;
+      if (user == null) {
+        throw Exception('No se pudo recuperar la cuenta de usuario');
+      }
+
+      await user.reload();
+      final refreshedUser = _auth.currentUser;
+      if (refreshedUser == null) {
+        throw Exception('No se pudo recuperar la cuenta de usuario');
+      }
+      if (refreshedUser.emailVerified) {
+        throw Exception(
+          'Este correo ya aparece verificado. Intenta iniciar sesión.',
+        );
+      }
+
+      await refreshedUser.sendEmailVerification();
+    } finally {
+      if (_auth.currentUser != null) {
+        await _auth.signOut();
+      }
     }
+  }
+
+  /// Enviar enlace para restablecer la contraseña.
+  Future<void> enviarEnlaceRecuperacion({required String correo}) async {
+    await _auth.sendPasswordResetEmail(email: correo.trim().toLowerCase());
   }
 
   /// Cerrar sesión
