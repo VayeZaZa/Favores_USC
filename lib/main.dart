@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'config/app_theme.dart';
+import 'firebase_options.dart';
 import 'screens/auth/welcome_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicialización de Firebase (intentar inicializar con opciones por defecto)
+  // Inicialización oficial de Firebase para el proyecto Favores USC
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
-    debugPrint('Firebase aún no inicializado con flutterfire configure: $e');
+    debugPrint('Error inicializando Firebase: $e');
   }
 
   runApp(

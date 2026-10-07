@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../config/app_theme.dart';
 import '../../services/auth_service.dart';
 import '../../utils/validators.dart';
+import '../favores/favores_feed_screen.dart';
 import 'register_screen.dart';
 
 /// Pantalla de Inicio de Sesión (RF02)
@@ -54,7 +55,13 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 
-      // TODO: Redirigir a HomeScreen (RF06, RF15)
+      // Redirigir al Feed de Favores (RF03, RNF02)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => const FavoresFeedScreen(),
+        ),
+      );
     } catch (e) {
       final errorStr = e.toString().replaceAll('Exception: ', '');
       setState(() {
