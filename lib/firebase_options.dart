@@ -49,12 +49,12 @@ class DefaultFirebaseOptions {
     databaseURL: 'https://favores-u-s-c-r4lrye-default-rtdb.firebaseio.com',
     storageBucket: 'favores-u-s-c-r4lrye.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyB7PoDqgDOFRhWn_oWFa8fPfYV65afOPKw',
-    appId: '1:491546356558:ios:0f0bf0463979fa5df5cc1f',
+    apiKey: 'AIzaSyAVE_mLXhT1Uh1C2a52OvoYkJZR2IGarfU',
+    appId: '1:491546356558:ios:19bacec470f17b7af5cc1f',
     messagingSenderId: '491546356558',
     projectId: 'favores-u-s-c-r4lrye',
+    databaseURL: 'https://favores-u-s-c-r4lrye-default-rtdb.firebaseio.com',
     storageBucket: 'favores-u-s-c-r4lrye.firebasestorage.app',
     iosBundleId: 'com.usc.favoresUsc',
   );

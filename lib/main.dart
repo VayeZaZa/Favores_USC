@@ -64,6 +64,21 @@ Future<void> _sembrarColeccionesFirebase() async {
       });
     }
 
+    final objEncDoc = await db.collection('objetos').doc('ejemplo_objeto_encontrado').get();
+    if (!objEncDoc.exists) {
+      await db.collection('objetos').doc('ejemplo_objeto_encontrado').set({
+        'tipo': 'encontrado',
+        'etiquetaColor': 'verde',
+        'titulo': 'Llaves con llavero USC',
+        'descripcion': 'Encontradas en el segundo piso de la biblioteca',
+        'lugarCampus': 'Bloque 2 - Biblioteca y Aulas Generales',
+        'urlFoto': 'https://images.unsplash.com/photo-1582139329536-e7284fece509?w=500',
+        'nombreDueno': 'Valeria Martínez',
+        'estadoActual': 'Publicado',
+        'fechaReporte': FieldValue.serverTimestamp(),
+      });
+    }
+
     // 3. Colección chats
     final chatDoc = await db.collection('chats').doc('ejemplo_chat').get();
     if (!chatDoc.exists) {

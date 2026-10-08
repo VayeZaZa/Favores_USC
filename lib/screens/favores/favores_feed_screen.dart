@@ -10,6 +10,7 @@ import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
 import 'crear_favor_screen.dart';
 import 'favor_detail_screen.dart';
+import '../objetos/articulos_screen.dart';
 
 /// Feed Paginado de Favores ajustado 100% al Mockup (image7.png) y especificaciones del documento
 class FavoresFeedScreen extends ConsumerStatefulWidget {
@@ -74,6 +75,18 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined, color: AppTheme.primaryColor),
+            tooltip: 'Artículos Perdidos y Encontrados',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ArticulosScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -295,7 +308,14 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
       padding: const EdgeInsets.only(right: 8.0),
       child: InkWell(
         onTap: () {
-          ref.read(favoresFeedProvider.notifier).cambiarFiltro(label);
+          if (label == 'Objetos') {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ArticulosScreen()),
+            );
+          } else {
+            ref.read(favoresFeedProvider.notifier).cambiarFiltro(label);
+          }
         },
         borderRadius: BorderRadius.circular(25),
         child: Container(
