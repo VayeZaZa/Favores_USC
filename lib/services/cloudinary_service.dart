@@ -80,4 +80,25 @@ class CloudinaryService {
 
     return urlsGuardadas;
   }
+
+  /// Sube una única imagen de objeto o de prueba de reclamo con compresión (RF10, RF11, RNF02)
+  Future<String?> subirImagenObjeto(File imagen, {String folder = 'objetos_fotos'}) async {
+    try {
+      // Compresión previa en cliente
+      File imagenAProcesar = (await comprimirImagen(imagen)) ?? imagen;
+
+      CloudinaryResponse response = await _cloudinary.uploadFile(
+        CloudinaryFile.fromFile(
+          imagenAProcesar.path,
+          resourceType: CloudinaryResourceType.Image,
+          folder: folder,
+        ),
+      );
+
+      return response.secureUrl.isNotEmpty ? response.secureUrl : null;
+    } catch (e) {
+      debugPrint('Error subiendo imagen a Cloudinary ($folder): $e');
+      return null;
+    }
+  }
 }
