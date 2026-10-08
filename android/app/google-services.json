@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "491546356558",
+    "firebase_url": "https://favores-u-s-c-r4lrye-default-rtdb.firebaseio.com",
+    "project_id": "favores-u-s-c-r4lrye",
+    "storage_bucket": "favores-u-s-c-r4lrye.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:491546356558:android:c6940a4fde47b6c6f5cc1f",
+        "android_client_info": {
+          "package_name": "com.usc.favores_usc"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB7PoDqgDOFRhWn_oWFa8fPfYV65afOPKw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

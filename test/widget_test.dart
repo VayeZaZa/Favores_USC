@@ -11,17 +11,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:favores_usc/main.dart';
 
 void main() {
-  testWidgets('welcome screen opens login and registration', (
+  testWidgets('welcome slides navigate to login and registration', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const ProviderScope(child: FavoresUscApp()));
     await tester.pumpAndSettle();
 
-    expect(find.text('La USC se ayuda.'), findsOneWidget);
+    expect(find.text('Tu universidad,\nmás cerca'), findsOneWidget);
+
+    await tester.tap(find.text('Siguiente'));
+    await tester.pumpAndSettle();
+    expect(find.text('La vida en la USC,\nse hace en equipo'), findsOneWidget);
+
+    await tester.tap(find.text('Siguiente'));
+    await tester.pumpAndSettle();
+    expect(find.text('Lo que se pierde,\npuede volver'), findsOneWidget);
 
     await tester.tap(find.text('Comenzar'));
     await tester.pumpAndSettle();
-    expect(find.text('Iniciar sesión'), findsOneWidget);
+    expect(find.text('Correo institucional'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Regístrate'));
     await tester.tap(find.text('Regístrate'));
