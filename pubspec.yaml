@@ -56,6 +56,8 @@ dependencies:
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0
   cloudinary_public: ^0.23.1
+  path: ^1.9.1
+  path_provider: ^2.1.6
 
   # Utilidades
   intl: ^0.19.0
@@ -65,6 +67,7 @@ dependencies:
   timeago: ^3.7.0
 
 dev_dependencies:
+  fake_cloud_firestore: ^3.1.0
   flutter_test:
     sdk: flutter
 

@@ -16,7 +16,9 @@ class FavorModel {
   final DateTime fechaCreacion;
   final bool soloLectura;
   final bool yaAvisado24h; // RF16: notificación tras 24h sin aceptar
-  final bool calificacionHabilitada; // RF08, RF09: true cuando pasa a "Entregado"
+  // RF08, RF09: true cuando pasa a Entregado.
+  final bool calificacionHabilitada;
+  final List<String> calificadoPor;
 
   FavorModel({
     required this.id,
@@ -34,6 +36,7 @@ class FavorModel {
     this.soloLectura = false,
     this.yaAvisado24h = false,
     this.calificacionHabilitada = false,
+    this.calificadoPor = const [],
   });
 
   String get tipo => tipoServicio;
@@ -42,6 +45,27 @@ class FavorModel {
   bool get esAceptado => estado == 'Aceptado';
   bool get esEntregado => estado == 'Entregado';
   bool get esCancelado => estado == 'Cancelado';
+
+  bool esParticipante(String usuarioId) =>
+      usuarioId.isNotEmpty && (usuarioId == idAutor || usuarioId == idAyudante);
+
+  bool puedeCalificar(String usuarioId) =>
+      esEntregado &&
+      calificacionHabilitada &&
+      esParticipante(usuarioId) &&
+      !calificadoPor.contains(usuarioId);
+
+  bool puedeAbrirChat(String usuarioId) =>
+      (esAceptado || esEntregado) &&
+      esParticipante(usuarioId) &&
+      idAutor.isNotEmpty &&
+      (idAyudante?.isNotEmpty ?? false);
+
+  String? otroParticipante(String usuarioId) => !esParticipante(usuarioId)
+      ? null
+      : usuarioId == idAutor
+      ? idAyudante
+      : idAutor;
 
   Map<String, dynamic> toMap() {
     return {
@@ -62,6 +86,7 @@ class FavorModel {
       'yaAvisado': yaAvisado24h,
       'yaAvisado24h': yaAvisado24h,
       'calificacionHabilitada': calificacionHabilitada,
+      'calificadoPor': calificadoPor,
     };
   }
 
@@ -81,8 +106,9 @@ class FavorModel {
       nombreAutor: map['nombreAutor'] as String? ?? '',
       idAyudante: map['idAyudante'] is DocumentReference
           ? (map['idAyudante'] as DocumentReference).id
-          : map['idAyudante'] as String?,
-      tipoServicio: map['tipoServicio'] as String? ?? map['tipo'] as String? ?? '',
+          : (map['idAyudante'] as String?)?.split('/').last,
+      tipoServicio:
+          map['tipoServicio'] as String? ?? map['tipo'] as String? ?? '',
       titulo: map['titulo'] as String? ?? '',
       descripcion: map['descripcion'] ?? '',
       ubicacion: map['ubicacion'] ?? '',
@@ -98,6 +124,7 @@ class FavorModel {
       yaAvisado24h:
           map['yaAvisado24h'] as bool? ?? map['yaAvisado'] as bool? ?? false,
       calificacionHabilitada: map['calificacionHabilitada'] ?? false,
+      calificadoPor: List<String>.from(map['calificadoPor'] ?? []),
     );
   }
 }
