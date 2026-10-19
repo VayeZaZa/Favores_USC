@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timeago/timeago.dart' as timeago;
+
 import '../../config/app_constants.dart';
 import '../../config/app_theme.dart';
 import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
-import '../../services/auth_service.dart';
+import '../../utils/favor_load_failure.dart';
+import 'widgets/favor_load_error.dart';
 import 'crear_favor_screen.dart';
 import 'favor_detail_screen.dart';
+import 'mi_actividad_favores_screen.dart';
 import '../objetos/articulos_screen.dart';
 
 /// Feed Paginado de Favores ajustado 100% al Mockup (image7.png) y especificaciones del documento
@@ -28,7 +31,8 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
     super.initState();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 200) {
+              _scrollController.position.maxScrollExtent - 200 &&
+          ref.read(favoresFeedProvider).error == null) {
         ref.read(favoresFeedProvider.notifier).cargarMas();
       }
     });
@@ -43,8 +47,24 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
   @override
   Widget build(BuildContext context) {
     final feedState = ref.watch(favoresFeedProvider);
-    final currentUser = AuthService().currentUser;
-    final nombreUsuario = currentUser?.displayName ??
+    final currentUser = ref.watch(favorSesionUsuarioProvider).valueOrNull;
+    final resumen = currentUser == null
+        ? null
+        : ref.watch(resumenFavoresUsuarioProvider(currentUser.uid)).valueOrNull;
+    if (currentUser != null) {
+      ref.listen(resumenFavoresUsuarioProvider(currentUser.uid), (
+        _,
+        siguiente,
+      ) {
+        siguiente.whenOrNull(
+          error: (error, stack) {
+            registrarErrorCargaFavor('resumen', error, stack);
+          },
+        );
+      });
+    }
+    final nombreUsuario =
+        currentUser?.displayName ??
         currentUser?.email?.split('@').first ??
         'Estudiante';
 
@@ -55,11 +75,14 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Saludo personalizado al usuario (Documento: ¡Hola David!)
             Text(
               '¡Hola, $nombreUsuario! 👋',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: Color(0xFF1E293B),
                 fontSize: 22,
@@ -68,16 +91,31 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
             ),
             const Text(
               'Comunidad Universidad Santiago de Cali',
-              style: TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 13,
-              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.inventory_2_outlined, color: AppTheme.primaryColor),
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Mi actividad de favores',
+            onPressed: currentUser == null
+                ? null
+                : () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          MiActividadFavoresScreen(usuarioId: currentUser.uid),
+                    ),
+                  ),
+          ),
+          IconButton(
+            icon: const Icon(
+              Icons.inventory_2_outlined,
+              color: AppTheme.primaryColor,
+            ),
             tooltip: 'Artículos Perdidos y Encontrados',
             onPressed: () {
               Navigator.push(
@@ -100,13 +138,37 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
-                _buildCategoryChip('Todos', Icons.grid_view_rounded, feedState.filtroTipo),
-                _buildCategoryChip('Objetos', Icons.inventory_2_outlined, feedState.filtroTipo),
-                _buildCategoryChip('Apuntes', Icons.description_outlined, feedState.filtroTipo),
-                _buildCategoryChip('Domicilio', Icons.directions_bike_outlined, feedState.filtroTipo),
+                _buildCategoryChip(
+                  'Todos',
+                  Icons.grid_view_rounded,
+                  feedState.filtroTipo,
+                ),
+                _buildCategoryChip(
+                  'Objetos',
+                  Icons.inventory_2_outlined,
+                  feedState.filtroTipo,
+                ),
+                _buildCategoryChip(
+                  'Apuntes',
+                  Icons.description_outlined,
+                  feedState.filtroTipo,
+                ),
+                _buildCategoryChip(
+                  'Domicilio',
+                  Icons.directions_bike_outlined,
+                  feedState.filtroTipo,
+                ),
                 ...AppConstants.tiposFavores
-                    .where((t) => !['Objetos', 'Apuntes', 'Domicilio'].contains(t))
-                    .map((t) => _buildCategoryChip(t, Icons.category_outlined, feedState.filtroTipo)),
+                    .where(
+                      (t) => !['Objetos', 'Apuntes', 'Domicilio'].contains(t),
+                    )
+                    .map(
+                      (t) => _buildCategoryChip(
+                        t,
+                        Icons.category_outlined,
+                        feedState.filtroTipo,
+                      ),
+                    ),
               ],
             ),
           ),
@@ -127,7 +189,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.blue.withOpacity(0.2),
+                    color: Colors.blue.withValues(alpha: 0.2),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -135,12 +197,15 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
               ),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Text(
-                          '12',
+                          (resumen?['favoresPedidos'] as num?)
+                                  ?.toInt()
+                                  .toString() ??
+                              '—',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 24,
@@ -150,19 +215,12 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                         SizedBox(height: 2),
                         Text(
                           'Mis Favores',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    height: 35,
-                    width: 1,
-                    color: Colors.white30,
-                  ),
+                  Container(height: 35, width: 1, color: Colors.white30),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -171,7 +229,15 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              '4.8',
+                              (resumen?['cantidadCalificaciones'] as num? ??
+                                          0) >
+                                      0
+                                  ? ((resumen?['promedioCalificacion'] ??
+                                                    resumen?['promedio'])
+                                                as num?)
+                                            ?.toStringAsFixed(1) ??
+                                        '—'
+                                  : '—',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 24,
@@ -184,11 +250,8 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Rating',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
+                          'Calificación',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                       ],
                     ),
@@ -206,12 +269,14 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Favores Recientes',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
+                Expanded(
+                  child: Text(
+                    'Favores Recientes',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1E293B),
+                    ),
                   ),
                 ),
                 Text(
@@ -235,25 +300,61 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                 await ref.read(favoresFeedProvider.notifier).cargarInicial();
               },
               child: feedState.favores.isEmpty && !feedState.isLoading
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.inbox_outlined, size: 64, color: Colors.grey),
-                          SizedBox(height: 12),
-                          Text(
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(32),
+                      children: [
+                        if (feedState.fallo != null || feedState.error != null)
+                          FavorLoadError(
+                            failure:
+                                feedState.fallo ??
+                                const FavorLoadFailure(
+                                  FavorLoadFailureKind.desconocido,
+                                  'No pudimos cargar los favores. Intenta de nuevo.',
+                                ),
+                            onRetry: () => ref
+                                .read(favoresFeedProvider.notifier)
+                                .cargarInicial(),
+                          )
+                        else ...[
+                          const Icon(
+                            Icons.inbox_outlined,
+                            size: 64,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
                             'No hay favores disponibles en esta categoría.',
-                            style: TextStyle(fontSize: 15, color: Colors.grey),
+                            textAlign: TextAlign.center,
                           ),
                         ],
-                      ),
+                      ],
                     )
                   : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       controller: _scrollController,
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 80),
-                      itemCount: feedState.favores.length + (feedState.isLoading ? 1 : 0),
+                      padding: const EdgeInsets.only(
+                        left: 16,
+                        right: 16,
+                        bottom: 80,
+                      ),
+                      itemCount:
+                          feedState.favores.length +
+                          (feedState.isLoading || feedState.error != null
+                              ? 1
+                              : 0),
                       itemBuilder: (context, index) {
                         if (index == feedState.favores.length) {
+                          if (feedState.error != null) {
+                            return TextButton(
+                              onPressed: () => ref
+                                  .read(favoresFeedProvider.notifier)
+                                  .cargarMas(),
+                              child: const Text(
+                                'No se cargaron más favores. Reintentar',
+                              ),
+                            );
+                          }
                           return const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
                             child: Center(child: CircularProgressIndicator()),
@@ -369,7 +470,7 @@ class _FavorCardMockup extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -395,12 +496,15 @@ class _FavorCardMockup extends StatelessWidget {
                         fit: BoxFit.cover,
                         placeholder: (context, url) => Container(
                           color: Colors.grey.shade200,
-                          child: const Center(child: CircularProgressIndicator()),
+                          child: const Center(
+                            child: CircularProgressIndicator(),
+                          ),
                         ),
-                        errorWidget: (context, url, err) => const Icon(Icons.broken_image),
+                        errorWidget: (context, url, err) =>
+                            const Icon(Icons.broken_image),
                       )
                     : Container(
-                        color: AppTheme.primaryColor.withOpacity(0.08),
+                        color: AppTheme.primaryColor.withValues(alpha: 0.08),
                         child: const Icon(
                           Icons.volunteer_activism,
                           size: 48,
@@ -413,7 +517,10 @@ class _FavorCardMockup extends StatelessWidget {
                 top: 14,
                 left: 14,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColor,
                     borderRadius: BorderRadius.circular(20),
@@ -433,13 +540,16 @@ class _FavorCardMockup extends StatelessWidget {
                 bottom: 14,
                 right: 14,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 4,
                       ),
                     ],
@@ -470,7 +580,7 @@ class _FavorCardMockup extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        favor.descripcion,
+                        favor.titulo.isEmpty ? favor.descripcion : favor.titulo,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -491,12 +601,19 @@ class _FavorCardMockup extends StatelessWidget {
                 // Ubicación Fija del Campus (RNF04)
                 Row(
                   children: [
-                    const Icon(Icons.location_on_outlined, size: 16, color: Color(0xFF64748B)),
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 16,
+                      color: Color(0xFF64748B),
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         favor.ubicacion,
-                        style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF64748B),
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -513,7 +630,9 @@ class _FavorCardMockup extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                      backgroundColor: AppTheme.primaryColor.withValues(
+                        alpha: 0.15,
+                      ),
                       child: const Text(
                         'USC',
                         style: TextStyle(
@@ -528,8 +647,10 @@ class _FavorCardMockup extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Estudiante USC',
+                          Text(
+                            favor.nombreAutor.isEmpty
+                                ? 'Estudiante USC'
+                                : favor.nombreAutor,
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
@@ -538,7 +659,10 @@ class _FavorCardMockup extends StatelessWidget {
                           ),
                           Text(
                             timeago.format(favor.fechaCreacion, locale: 'es'),
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF94A3B8),
+                            ),
                           ),
                         ],
                       ),
@@ -550,7 +674,8 @@ class _FavorCardMockup extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => FavorDetailScreen(favorId: favor.id),
+                            builder: (_) =>
+                                FavorDetailScreen(favorId: favor.id),
                           ),
                         );
                       },
@@ -559,7 +684,10 @@ class _FavorCardMockup extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                       ),
                       child: const Text(
                         'Ver Favor',

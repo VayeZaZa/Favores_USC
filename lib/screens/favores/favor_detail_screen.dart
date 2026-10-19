@@ -4,10 +4,12 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timeago/timeago.dart' as timeago;
+
 import '../../config/app_theme.dart';
 import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
+import '../chat/chat_room_screen.dart';
 
 /// Pantalla de Consultar / Detalle del Favor ajustada 100% a la maqueta visual (image8.png, image9.png)
 class FavorDetailScreen extends ConsumerStatefulWidget {
@@ -22,193 +24,200 @@ class FavorDetailScreen extends ConsumerStatefulWidget {
 class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
   bool _isProcessing = false;
 
-  void _mostrarDialogoCalificacion(BuildContext context, FavorModel favor) {
-    int estrellas = 5;
-    final comentarioController = TextEditingController();
+  Future<void> _realizarAccion(
+    Future<void> Function() accion,
+    String exito,
+  ) async {
+    if (_isProcessing || !mounted) return;
+    setState(() => _isProcessing = true);
+    try {
+      await accion();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(exito)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
 
-    showDialog(
+  Future<void> _mostrarDialogoCalificacion(FavorModel favor) async {
+    final uid = AuthService().currentUser?.uid;
+    if (uid == null || !favor.puedeCalificar(uid) || _isProcessing) return;
+    int estrellas = 5;
+    String comentario = '';
+    final enviar = await showDialog<bool>(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Calificar Servicio'),
-          content: Column(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Calificar el favor'),
+        content: SingleChildScrollView(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('¿Qué tal fue la experiencia con este favor?'),
+              const Text('¿Cómo fue tu experiencia con el otro participante?'),
               const SizedBox(height: 16),
               RatingBar.builder(
                 initialRating: 5,
                 minRating: 1,
-                direction: Axis.horizontal,
                 allowHalfRating: false,
                 itemCount: 5,
-                itemPadding: const EdgeInsets.symmetric(horizontal: 4.0),
-                itemBuilder: (context, _) => const Icon(
-                  Icons.star,
-                  color: Colors.amber,
-                ),
-                onRatingUpdate: (rating) {
-                  estrellas = rating.toInt();
-                },
+                itemSize: 32,
+                itemBuilder: (_, index) =>
+                    const Icon(Icons.star, color: Colors.amber),
+                onRatingUpdate: (valor) => estrellas = valor.toInt(),
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: comentarioController,
-                maxLines: 2,
+                maxLength: 300,
+                maxLines: 3,
+                onChanged: (valor) => comentario = valor,
                 decoration: const InputDecoration(
                   labelText: 'Comentario opcional',
-                  border: OutlineInputBorder(),
                 ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('CANCELAR'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final currentUser = AuthService().currentUser;
-                if (currentUser == null) return;
-
-                Navigator.pop(dialogContext);
-                setState(() => _isProcessing = true);
-
-                try {
-                  final idDestinatario = currentUser.uid == favor.idAutor
-                      ? (favor.idAyudante ?? '')
-                      : favor.idAutor;
-
-                  final favorService = ref.read(favorServiceProvider);
-                  await favorService.calificarUsuario(
-                    favorId: favor.id,
-                    idAutorCalificador: currentUser.uid,
-                    idDestinatario: idDestinatario,
-                    estrellas: estrellas,
-                    comentario: comentarioController.text.trim(),
-                  );
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('¡Calificación enviada correctamente!'),
-                        backgroundColor: AppTheme.successColor,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error al calificar: $e')),
-                    );
-                  }
-                } finally {
-                  if (mounted) setState(() => _isProcessing = false);
-                }
-              },
-              child: const Text('ENVIAR'),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+    if (enviar != true || !mounted) return;
+    await _realizarAccion(
+      () => ref
+          .read(favorServiceProvider)
+          .calificarUsuario(
+            favorId: favor.id,
+            idAutorCalificador: uid,
+            idDestinatario: favor.otroParticipante(uid)!,
+            estrellas: estrellas,
+            comentario: comentario,
+          ),
+      '¡Calificación enviada correctamente!',
     );
   }
 
-  void _mostrarDialogoReporte(BuildContext context, FavorModel favor) {
+  Future<void> _mostrarDialogoReporte(FavorModel favor) async {
+    final uid = AuthService().currentUser?.uid;
+    if (uid == null ||
+        !favor.esEntregado ||
+        !favor.esParticipante(uid) ||
+        _isProcessing) {
+      return;
+    }
     String motivo = 'Incumplimiento';
-    final descripcionController = TextEditingController();
-
-    showDialog(
+    String descripcion = '';
+    final enviar = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Reportar Favor / Usuario'),
-          content: Column(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reportar al participante'),
+        content: SingleChildScrollView(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: motivo,
-                decoration: const InputDecoration(
-                  labelText: 'Motivo del reporte',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'Incumplimiento', child: Text('Incumplimiento de entrega')),
-                  DropdownMenuItem(value: 'Conducta Inadecuada', child: Text('Conducta inadecuada')),
-                  DropdownMenuItem(value: 'Fraude', child: Text('Fraude / Cobro indebido')),
-                  DropdownMenuItem(value: 'Otro', child: Text('Otro motivo')),
-                ],
-                onChanged: (val) {
-                  if (val != null) motivo = val;
-                },
+                initialValue: motivo,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Motivo'),
+                items:
+                    const [
+                          'Incumplimiento',
+                          'Conducta inadecuada',
+                          'Fraude',
+                          'Otro',
+                        ]
+                        .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                        .toList(),
+                onChanged: (valor) => motivo = valor ?? motivo,
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: descripcionController,
+                maxLength: 1000,
                 maxLines: 3,
+                onChanged: (valor) => descripcion = valor,
                 decoration: const InputDecoration(
                   labelText: 'Detalles del reporte',
-                  border: OutlineInputBorder(),
                 ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('CANCELAR'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
-              onPressed: () async {
-                final currentUser = AuthService().currentUser;
-                if (currentUser == null) return;
-
-                Navigator.pop(dialogContext);
-                setState(() => _isProcessing = true);
-
-                try {
-                  final idReportado = currentUser.uid == favor.idAutor
-                      ? (favor.idAyudante ?? favor.idAutor)
-                      : favor.idAutor;
-
-                  final favorService = ref.read(favorServiceProvider);
-                  await favorService.crearReporte(
-                    favorId: favor.id,
-                    idReportante: currentUser.uid,
-                    idReportado: idReportado,
-                    motivo: motivo,
-                    descripcion: descripcionController.text.trim(),
-                  );
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Reporte enviado a administración.'),
-                        backgroundColor: AppTheme.warningColor,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error enviando reporte: $e')),
-                    );
-                  }
-                } finally {
-                  if (mounted) setState(() => _isProcessing = false);
-                }
-              },
-              child: const Text('REPORTAR', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Enviar reporte'),
+          ),
+        ],
+      ),
     );
+    if (enviar != true || !mounted) return;
+    await _realizarAccion(
+      () => ref
+          .read(favorServiceProvider)
+          .crearReporte(
+            favorId: favor.id,
+            idReportante: uid,
+            idReportado: favor.otroParticipante(uid)!,
+            motivo: motivo,
+            descripcion: descripcion,
+          ),
+      'Reporte enviado a administración.',
+    );
+  }
+
+  Future<void> _abrirChat(FavorModel favor) async {
+    final uid = AuthService().currentUser?.uid;
+    if (uid == null || !favor.puedeAbrirChat(uid) || _isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      await ref
+          .read(favorServiceProvider)
+          .prepararChatFavor(favor.id, idUsuario: uid);
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => ChatRoomScreen(
+            idReferencia: favor.id,
+            tipoReferencia: 'favor',
+            tituloReferencia: favor.titulo,
+            otroUsuarioId: favor.otroParticipante(uid)!,
+            otroUsuarioNombre: uid == favor.idAutor
+                ? 'Ayudante'
+                : (favor.nombreAutor.isEmpty
+                      ? 'Solicitante'
+                      : favor.nombreAutor),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
   }
 
   Future<void> _aceptarFavor(FavorModel favor) async {
@@ -224,28 +233,39 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           'Ubicación: ${favor.ubicacion}',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('CANCELAR')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('CANCELAR'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+            ),
             child: const Text('ACEPTAR', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
 
-    if (confirmar != true) return;
+    if (confirmar != true || !mounted) return;
 
     setState(() => _isProcessing = true);
 
     try {
       final favorService = ref.read(favorServiceProvider);
-      await favorService.aceptarFavor(favorId: favor.id, idAyudante: currentUser.uid);
+      await favorService.aceptarFavor(
+        favorId: favor.id,
+        idAyudante: currentUser.uid,
+      );
 
       if (mounted) {
+        ref.invalidate(favoresFeedProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('¡Favor aceptado exitosamente! Ya puedes coordinar la entrega.'),
+            content: Text(
+              '¡Favor aceptado exitosamente! Ya puedes coordinar la entrega.',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
@@ -266,13 +286,36 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
 
   Future<void> _confirmarPago(FavorModel favor) async {
     final currentUser = AuthService().currentUser;
-    if (currentUser == null) return;
+    if (currentUser == null || _isProcessing) return;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Ya recibiste el pago?'),
+        content: const Text(
+          'Confirma únicamente cuando hayas recibido el pago por fuera de la app. El favor quedará finalizado y el chat pasará a solo lectura.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Volver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sí, recibí el pago'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
 
     setState(() => _isProcessing = true);
 
     try {
       final favorService = ref.read(favorServiceProvider);
-      await favorService.confirmarPagoYEntregar(favorId: favor.id, idAyudante: currentUser.uid);
+      await favorService.confirmarPagoYEntregar(
+        favorId: favor.id,
+        idAyudante: currentUser.uid,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -313,21 +356,27 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
         actions: [
           favorAsync.when(
             data: (favor) {
-              if (favor == null) return const SizedBox.shrink();
+              if (favor == null ||
+                  !favor.esEntregado ||
+                  !favor.esParticipante(currentUser?.uid ?? '')) {
+                return const SizedBox.shrink();
+              }
               return IconButton(
                 icon: const Icon(Icons.outlined_flag, color: Color(0xFF64748B)),
-                onPressed: () => _mostrarDialogoReporte(context, favor),
+                onPressed: () => _mostrarDialogoReporte(favor),
               );
             },
             loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            error: (_, errorStack) => const SizedBox.shrink(),
           ),
         ],
       ),
       body: favorAsync.when(
         data: (favor) {
           if (favor == null) {
-            return const Center(child: Text('El favor no se encuentra disponible.'));
+            return const Center(
+              child: Text('El favor no se encuentra disponible.'),
+            );
           }
 
           final esAutor = currentUser?.uid == favor.idAutor;
@@ -337,7 +386,10 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
             children: [
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -373,7 +425,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              favor.descripcion.split('\n').first,
+                              favor.titulo.isEmpty
+                                  ? favor.descripcion.split('\n').first
+                                  : favor.titulo,
                               style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
@@ -394,7 +448,10 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                       const SizedBox(height: 4),
                       Text(
                         'Publicado ${timeago.format(favor.fechaCreacion, locale: 'es')}',
-                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                        style: const TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 13,
+                        ),
                       ),
                       const SizedBox(height: 20),
 
@@ -418,7 +475,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                       _buildInfoCard(
                         icon: Icons.person_outline_rounded,
                         title: 'Solicitante',
-                        subtitle: esAutor ? 'Tú (Autor del favor)' : 'Estudiante USC',
+                        subtitle: esAutor
+                            ? 'Tú (Autor del favor)'
+                            : 'Estudiante USC',
                       ),
                       const SizedBox(height: 24),
 
@@ -479,7 +538,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                                   ? 'Entrega realizada con éxito'
                                   : 'Entrega en camino',
                               isDone: favor.esEntregado,
-                              color: favor.esEntregado ? Colors.green : Colors.grey.shade300,
+                              color: favor.esEntregado
+                                  ? Colors.green
+                                  : Colors.grey.shade300,
                               isLast: true,
                             ),
                           ],
@@ -497,7 +558,7 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                   color: Colors.white,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 10,
                       offset: const Offset(0, -4),
                     ),
@@ -508,15 +569,21 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                     // Botón "Chat con Solicitante" (Mockup image8.png)
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Abriendo Chat de la comunidad...')),
-                          );
-                        },
-                        icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+                        onPressed:
+                            !_isProcessing &&
+                                favor.puedeAbrirChat(currentUser?.uid ?? '')
+                            ? () => _abrirChat(favor)
+                            : null,
+                        icon: const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          color: Colors.white,
+                        ),
                         label: const Text(
                           'Chat',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF1D4ED8),
@@ -534,42 +601,79 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                       child: _isProcessing
                           ? const Center(child: CircularProgressIndicator())
                           : favor.esPublicado && !esAutor
-                              ? ElevatedButton.icon(
-                                  onPressed: () => _aceptarFavor(favor),
-                                  icon: const Icon(Icons.check_circle_outline, color: Colors.white),
-                                  label: const Text('Aceptar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryColor,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  ),
-                                )
-                              : favor.esAceptado && esAyudante
-                                  ? ElevatedButton.icon(
-                                      onPressed: () => _confirmarPago(favor),
-                                      icon: const Icon(Icons.task_alt_rounded, color: Colors.white),
-                                      label: const Text('Confirmar Pago', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                      ),
-                                    )
-                                  : favor.esEntregado && favor.calificacionHabilitada
-                                      ? ElevatedButton.icon(
-                                          onPressed: () => _mostrarDialogoCalificacion(context, favor),
-                                          icon: const Icon(Icons.star, color: Colors.white),
-                                          label: const Text('Calificar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.amber.shade800,
-                                            padding: const EdgeInsets.symmetric(vertical: 14),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                          ),
-                                        )
-                                      : OutlinedButton(
-                                          onPressed: null,
-                                          child: Text(favor.estado),
-                                        ),
+                          ? ElevatedButton.icon(
+                              onPressed: () => _aceptarFavor(favor),
+                              icon: const Icon(
+                                Icons.check_circle_outline,
+                                color: Colors.white,
+                              ),
+                              label: const Text(
+                                'Aceptar',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryColor,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            )
+                          : favor.esAceptado && esAyudante
+                          ? ElevatedButton.icon(
+                              onPressed: () => _confirmarPago(favor),
+                              icon: const Icon(
+                                Icons.task_alt_rounded,
+                                color: Colors.white,
+                              ),
+                              label: const Text(
+                                'Confirmar pago recibido',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            )
+                          : favor.puedeCalificar(currentUser?.uid ?? '')
+                          ? ElevatedButton.icon(
+                              onPressed: () =>
+                                  _mostrarDialogoCalificacion(favor),
+                              icon: const Icon(Icons.star, color: Colors.white),
+                              label: const Text(
+                                'Calificar',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.amber.shade800,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            )
+                          : OutlinedButton(
+                              onPressed: null,
+                              child: Text(favor.estado),
+                            ),
                     ),
                   ],
                 ),
@@ -578,12 +682,17 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, stack) => Center(child: Text('Error cargando favor: $err')),
+        error: (err, stack) =>
+            Center(child: Text('Error cargando favor: $err')),
       ),
     );
   }
 
-  Widget _buildInfoCard({required IconData icon, required String title, required String subtitle}) {
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -596,7 +705,7 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withOpacity(0.1),
+              color: AppTheme.primaryColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: AppTheme.primaryColor, size: 22),
@@ -608,12 +717,20 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF1E293B), fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF1E293B),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
@@ -623,7 +740,12 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
     );
   }
 
-  Widget _buildTimelineStep({required String label, required bool isDone, required Color color, bool isLast = false}) {
+  Widget _buildTimelineStep({
+    required String label,
+    required bool isDone,
+    required Color color,
+    bool isLast = false,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -641,7 +763,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
               Container(
                 width: 2,
                 height: 24,
-                color: isDone ? color.withOpacity(0.5) : Colors.grey.shade200,
+                color: isDone
+                    ? color.withValues(alpha: 0.5)
+                    : Colors.grey.shade200,
               ),
           ],
         ),
@@ -654,7 +778,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: isDone ? FontWeight.bold : FontWeight.normal,
-                color: isDone ? const Color(0xFF1E293B) : const Color(0xFF94A3B8),
+                color: isDone
+                    ? const Color(0xFF1E293B)
+                    : const Color(0xFF94A3B8),
               ),
             ),
           ),

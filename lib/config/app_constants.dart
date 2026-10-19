@@ -52,6 +52,9 @@ class AppConstants {
 
   // Tipos de favores (RF03)
   static const List<String> tiposFavores = [
+    'Objeto',
+    'Apuntes',
+    'Domicilio',
     'Fotocopias / Impresiones',
     'Comida / Cafetería',
     'Cuidar puesto / fila',

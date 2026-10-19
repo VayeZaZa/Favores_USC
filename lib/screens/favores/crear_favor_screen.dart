@@ -1,11 +1,14 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../../config/app_constants.dart';
 import '../../config/app_theme.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
+import '../../utils/favor_validators.dart';
 
 /// Pantalla Crear Favor ajustada 100% a la maqueta visual (image5.jpeg)
 class CrearFavorScreen extends ConsumerStatefulWidget {
@@ -50,18 +53,29 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 85,
       );
 
       if (pickedFile != null) {
+        if (!mounted) return;
+        final error = FavorValidators.imagen(
+          ruta: pickedFile.path,
+          bytes: await pickedFile.length(),
+        );
+        if (!mounted) return;
+        if (error != null) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(error)));
+          return;
+        }
         setState(() {
           _imagenesSeleccionadas.add(File(pickedFile.path));
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error seleccionando imagen: $e')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error seleccionando imagen: $e')));
     }
   }
 
@@ -76,7 +90,9 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
 
     if (_ubicacionSeleccionada == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor selecciona una ubicación del campus.')),
+        const SnackBar(
+          content: Text('Por favor selecciona una ubicación del campus.'),
+        ),
       );
       return;
     }
@@ -90,7 +106,6 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
     }
 
     final pago = int.tryParse(_pagoController.text.trim()) ?? 0;
-    final descripcionCompleta = '${_tituloController.text.trim()}\n\n${_descripcionController.text.trim()}';
 
     setState(() => _isLoading = true);
 
@@ -171,11 +186,23 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: _buildTipoCard('Objeto', Icons.shopping_bag_outlined)),
+                  Expanded(
+                    child: _buildTipoCard(
+                      'Objeto',
+                      Icons.shopping_bag_outlined,
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(child: _buildTipoCard('Apuntes', Icons.description_outlined)),
+                  Expanded(
+                    child: _buildTipoCard(
+                      'Apuntes',
+                      Icons.description_outlined,
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(child: _buildTipoCard('Domicilio', Icons.home_outlined)),
+                  Expanded(
+                    child: _buildTipoCard('Domicilio', Icons.home_outlined),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
@@ -194,10 +221,16 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                 controller: _tituloController,
                 decoration: InputDecoration(
                   hintText: 'Ej: Apuntes de Cálculo II',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 14,
+                  ),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: Colors.grey.shade300),
@@ -207,7 +240,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                     borderSide: BorderSide(color: Colors.grey.shade200),
                   ),
                 ),
-                validator: (val) => val == null || val.trim().isEmpty ? 'Ingresa el título del favor' : null,
+                validator: FavorValidators.titulo,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -215,7 +248,10 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                 maxLines: 3,
                 decoration: InputDecoration(
                   hintText: 'Describe detalladamente lo que necesitas...',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 14,
+                  ),
                   filled: true,
                   fillColor: Colors.white,
                   contentPadding: const EdgeInsets.all(16),
@@ -228,7 +264,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                     borderSide: BorderSide(color: Colors.grey.shade200),
                   ),
                 ),
-                validator: (val) => val == null || val.trim().length < 5 ? 'Describe lo que necesitas' : null,
+                validator: FavorValidators.descripcion,
               ),
               const SizedBox(height: 24),
 
@@ -280,7 +316,11 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                                   color: Colors.red,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.close, size: 14, color: Colors.white),
+                                child: const Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -298,7 +338,10 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: Colors.grey.shade300),
                           ),
-                          child: const Icon(Icons.add_a_photo_outlined, color: AppTheme.primaryColor),
+                          child: const Icon(
+                            Icons.add_a_photo_outlined,
+                            color: AppTheme.primaryColor,
+                          ),
                         ),
                       ),
                   ],
@@ -327,10 +370,13 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _ubicacionSeleccionada,
+                      initialValue: _ubicacionSeleccionada,
                       isExpanded: true,
                       decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.location_on, color: AppTheme.primaryColor),
+                        prefixIcon: const Icon(
+                          Icons.location_on,
+                          color: AppTheme.primaryColor,
+                        ),
                         filled: true,
                         fillColor: const Color(0xFFF8FAFC),
                         border: OutlineInputBorder(
@@ -339,13 +385,18 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                         ),
                       ),
                       hint: const Text('Selecciona punto de encuentro USC'),
+                      validator: FavorValidators.ubicacion,
                       items: AppConstants.puntosCampus.map((punto) {
                         return DropdownMenuItem(
                           value: punto,
-                          child: Text(punto, style: const TextStyle(fontSize: 14)),
+                          child: Text(
+                            punto,
+                            style: const TextStyle(fontSize: 14),
+                          ),
                         );
                       }).toList(),
-                      onChanged: (val) => setState(() => _ubicacionSeleccionada = val),
+                      onChanged: (val) =>
+                          setState(() => _ubicacionSeleccionada = val),
                     ),
                   ],
                 ),
@@ -358,7 +409,10 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: 'Pago ofrecido en COP (Mínimo \$1.000)',
-                  prefixIcon: const Icon(Icons.attach_money, color: Colors.green),
+                  prefixIcon: const Icon(
+                    Icons.attach_money,
+                    color: Colors.green,
+                  ),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -366,13 +420,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                     borderSide: BorderSide(color: Colors.grey.shade300),
                   ),
                 ),
-                validator: (val) {
-                  final monto = int.tryParse(val ?? '');
-                  if (monto == null || monto < AppConstants.minPagoFavor) {
-                    return 'El pago mínimo es \$${AppConstants.minPagoFavor} COP';
-                  }
-                  return null;
-                },
+                validator: FavorValidators.pago,
               ),
               const SizedBox(height: 30),
 
@@ -424,7 +472,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
           boxShadow: [
             if (isSelected)
               BoxShadow(
-                color: AppTheme.primaryColor.withOpacity(0.2),
+                color: AppTheme.primaryColor.withValues(alpha: 0.2),
                 blurRadius: 8,
                 offset: const Offset(0, 4),
               ),
