@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 /// Servicio para manejo de compresión de imágenes en el cliente y subida a Cloudinary (RF04, RNF02)
 class CloudinaryService {
   // Ajustar con la configuración de Cloudinary del proyecto
-  static const String _cloudName = 'favores-usc-cloud'; 
+  static const String _cloudName = 'ltg6anp0';
   static const String _uploadPreset = 'favores_preset';
 
   late final CloudinaryPublic _cloudinary;

@@ -11,6 +11,7 @@ import '../../services/auth_service.dart';
 import 'crear_favor_screen.dart';
 import 'favor_detail_screen.dart';
 import '../objetos/articulos_screen.dart';
+import '../perfil/perfil_screen.dart';
 
 /// Feed Paginado de Favores ajustado 100% al Mockup (image7.png) y especificaciones del documento
 class FavoresFeedScreen extends ConsumerStatefulWidget {
@@ -76,6 +77,16 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined, color: AppTheme.primaryColor),
+            tooltip: 'Mi perfil',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const PerfilScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined, color: AppTheme.primaryColor),
             tooltip: 'Artículos Perdidos y Encontrados',

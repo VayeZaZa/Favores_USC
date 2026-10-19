@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'favores_brand.dart';
 import 'login_screen.dart';
+import 'register_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -85,6 +86,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   void _openLogin() {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const LoginScreen()));
+  }
+
+  void _openRegister() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const RegisterScreen()));
   }
 
   void _goToPage(int page) {
@@ -191,7 +197,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   SizedBox(
                     height: 46,
                     child: TextButton(
-                      onPressed: _openLogin,
+                      onPressed: _openRegister,
                       style: TextButton.styleFrom(
                         foregroundColor: _mutedBlue,
                         textStyle: const TextStyle(
@@ -200,7 +206,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                           shadows: [Shadow(color: _navy, blurRadius: 8)],
                         ),
                       ),
-                      child: const Text('Ya tengo una cuenta'),
+                      child: const Text('Crear cuenta'),
                     ),
                   ),
                 ],
