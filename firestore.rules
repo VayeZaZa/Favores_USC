@@ -1,0 +1,258 @@
+rules_version = '2';
+
+// Modelo actual de la app Flutter. Todos los accesos requieren una sesión.
+// usuarios/{uid}: perfil privado; uid/correo inmutables. No se asignan roles.
+// favores/{id}: autor, ayudante opcional y Publicado -> Aceptado -> Entregado.
+// objetos/{id}: dueño, reclamante opcional y Publicado -> Pendiente -> Confirmado -> Entregado.
+// chats/{id}/mensajes/{id}: dos participantes inmutables, vinculados a un caso.
+// calificaciones/{favorId_uid}: una evaluación por participante tras la entrega.
+// reportes/{id}: solo quien presenta un reporte puede leerlo.
+// El campo verificado del perfil NO concede permisos. No se exige email_verified.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function autenticado() { return request.auth != null; }
+    function esPropietario(uid) { return autenticado() && request.auth.uid == uid; }
+    function esAutor(valor) {
+      return autenticado() && (valor == request.auth.uid ||
+        valor == /databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+    function texto(valor, minimo, maximo) {
+      return valor is string && valor.size() >= minimo && valor.size() <= maximo;
+    }
+    function imagen(url) {
+      return texto(url, 0, 2048) && (url == '' || url.matches('https://[^ ]+'));
+    }
+    function imagenes(lista) {
+      return lista is list && lista.size() <= 3 &&
+        (lista.size() < 1 || imagen(lista[0])) &&
+        (lista.size() < 2 || imagen(lista[1])) &&
+        (lista.size() < 3 || imagen(lista[2]));
+    }
+    function insignias(lista) {
+      return lista is list && lista.size() <= 5 &&
+        (lista.size() < 1 || texto(lista[0], 1, 60)) &&
+        (lista.size() < 2 || texto(lista[1], 1, 60)) &&
+        (lista.size() < 3 || texto(lista[2], 1, 60)) &&
+        (lista.size() < 4 || texto(lista[3], 1, 60)) &&
+        (lista.size() < 5 || texto(lista[4], 1, 60));
+    }
+    function contador(valor) { return valor is int && valor >= 0 && valor <= 1000000; }
+    function perfilValido(d, uid) {
+      return d.keys().hasOnly(['uid', 'nombre', 'display_name', 'correo', 'email',
+          'telefono', 'phone_number', 'programa', 'semestre', 'verificado',
+          'intentosFallidos', 'bloqueadoHasta', 'tokenFCM', 'fotoPerfil',
+          'favoresCompletados', 'favoresDevueltos', 'favoresPedidos',
+          'objetosDevueltos', 'promedio', 'promedioCalificacion', 'insignias']) &&
+        d.uid == uid && texto(d.get('nombre', ''), 0, 120) &&
+        texto(d.get('display_name', ''), 0, 120) &&
+        texto(d.get('correo', ''), 0, 254) && texto(d.get('email', ''), 0, 254) &&
+        texto(d.get('telefono', ''), 0, 30) && texto(d.get('phone_number', ''), 0, 30) &&
+        texto(d.programa, 1, 120) && d.semestre is int && d.semestre >= 1 && d.semestre <= 20 &&
+        d.verificado is bool && contador(d.get('intentosFallidos', 0)) &&
+        (d.get('bloqueadoHasta', null) == null || d.bloqueadoHasta is timestamp) &&
+        (d.get('tokenFCM', null) == null || texto(d.tokenFCM, 0, 4096)) &&
+        imagen(d.get('fotoPerfil', '')) && insignias(d.get('insignias', [])) &&
+        contador(d.get('favoresCompletados', 0)) && contador(d.get('favoresDevueltos', 0)) &&
+        contador(d.get('favoresPedidos', 0)) && contador(d.get('objetosDevueltos', 0)) &&
+        d.get('promedio', 5) is number && d.get('promedio', 5) >= 0 && d.get('promedio', 5) <= 5 &&
+        d.get('promedioCalificacion', 5) is number &&
+        d.get('promedioCalificacion', 5) >= 0 && d.get('promedioCalificacion', 5) <= 5;
+    }
+    match /usuarios/{uid} {
+      allow read: if esPropietario(uid);
+      allow create: if esPropietario(uid) && perfilValido(request.resource.data, uid) &&
+        request.resource.data.correo == request.auth.token.email &&
+        request.resource.data.get('email', request.auth.token.email) == request.auth.token.email;
+      allow update: if esPropietario(uid) && perfilValido(request.resource.data, uid) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'uid', 'correo', 'email', 'promedio', 'promedioCalificacion']);
+      allow delete: if false;
+    }
+
+    function favorValido(d) {
+      return d.keys().hasOnly(['id', 'idAutor', 'idAyudante', 'nombreAutor', 'tipo',
+          'tipoServicio', 'titulo', 'descripcion', 'ubicacion', 'pago', 'estado',
+          'urlFotos', 'fechaCreacion', 'soloLectura', 'yaAvisado', 'yaAvisado24h',
+          'calificacionHabilitada']) &&
+        texto(d.get('id', ''), 0, 1500) &&
+        (d.idAutor is path || texto(d.idAutor, 1, 128)) &&
+        (d.get('idAyudante', null) == null || texto(d.idAyudante, 1, 128)) &&
+        texto(d.get('nombreAutor', ''), 0, 120) && texto(d.titulo, 1, 200) &&
+        texto(d.descripcion, 1, 5000) && texto(d.ubicacion, 1, 200) &&
+        texto(d.get('tipoServicio', d.get('tipo', '')), 1, 120) &&
+        texto(d.get('tipo', ''), 0, 120) &&
+        d.pago is int && d.pago >= 1000 && d.pago <= 10000000 &&
+        d.estado in ['Publicado', 'Aceptado', 'Entregado', 'Cancelado'] &&
+        imagenes(d.get('urlFotos', [])) && d.fechaCreacion is timestamp &&
+        d.get('soloLectura', false) is bool && d.get('yaAvisado', false) is bool &&
+        d.get('yaAvisado24h', false) is bool && d.get('calificacionHabilitada', false) is bool;
+    }
+    match /favores/{id} {
+      allow read: if autenticado();
+      allow create: if autenticado() && request.resource.data.idAutor == request.auth.uid &&
+        favorValido(request.resource.data) && request.resource.data.estado == 'Publicado' &&
+        request.resource.data.get('idAyudante', null) == null &&
+        request.resource.data.get('id', id) == id &&
+        request.resource.data.get('calificacionHabilitada', false) == false;
+      allow update: if autenticado() && favorValido(request.resource.data) &&
+        request.resource.data.idAutor == resource.data.idAutor && (
+          (esAutor(resource.data.idAutor) && resource.data.estado == 'Publicado' &&
+            request.resource.data.estado in ['Publicado', 'Cancelado'] &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'titulo', 'descripcion', 'ubicacion', 'pago', 'tipo', 'tipoServicio',
+              'urlFotos', 'nombreAutor', 'fechaCreacion', 'yaAvisado', 'yaAvisado24h', 'estado'])) ||
+          (!esAutor(resource.data.idAutor) && resource.data.estado == 'Publicado' &&
+            resource.data.get('idAyudante', null) == null &&
+            request.resource.data.estado == 'Aceptado' && request.resource.data.idAyudante == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'idAyudante'])) ||
+          (resource.data.estado == 'Aceptado' && resource.data.idAyudante == request.auth.uid &&
+            request.resource.data.estado == 'Entregado' && request.resource.data.calificacionHabilitada == true &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'calificacionHabilitada']))
+        );
+      allow delete: if esAutor(resource.data.idAutor) && resource.data.estado in ['Publicado', 'Cancelado'];
+    }
+
+    function objetoValido(d) {
+      return d.keys().hasOnly(['idDueno', 'nombreDueno', 'titulo', 'descripcion', 'tipo',
+          'etiquetaColor', 'lugarCampus', 'urlFoto', 'estadoActual', 'idReclamante',
+          'nombreReclamante', 'fotoPruebaUrl', 'fechaReporte', 'fechaActualizacion', 'soloLectura']) &&
+        (d.idDueno is path || texto(d.idDueno, 1, 128)) &&
+        texto(d.get('nombreDueno', ''), 0, 120) && texto(d.titulo, 1, 200) &&
+        texto(d.descripcion, 1, 5000) && d.tipo in ['perdido', 'encontrado'] &&
+        texto(d.etiquetaColor, 1, 30) && texto(d.lugarCampus, 1, 200) && imagen(d.get('urlFoto', '')) &&
+        d.estadoActual in ['Publicado', 'Pendiente', 'Confirmado', 'Entregado'] &&
+        (d.get('idReclamante', null) == null || texto(d.idReclamante, 1, 128)) &&
+        (d.get('nombreReclamante', null) == null || texto(d.nombreReclamante, 0, 120)) &&
+        (d.get('fotoPruebaUrl', null) == null || imagen(d.fotoPruebaUrl)) &&
+        d.fechaReporte is timestamp && d.get('fechaActualizacion', request.time) is timestamp &&
+        d.get('soloLectura', false) is bool;
+    }
+    match /objetos/{id} {
+      allow read: if autenticado();
+      allow create: if autenticado() && request.resource.data.idDueno == request.auth.uid &&
+        objetoValido(request.resource.data) && request.resource.data.estadoActual == 'Publicado' &&
+        request.resource.data.get('idReclamante', null) == null && request.resource.data.soloLectura == false;
+      allow update: if autenticado() && objetoValido(request.resource.data) &&
+        request.resource.data.idDueno == resource.data.idDueno && (
+          (esAutor(resource.data.idDueno) && resource.data.estadoActual == 'Publicado' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'nombreDueno', 'titulo', 'descripcion', 'tipo', 'etiquetaColor',
+              'lugarCampus', 'urlFoto', 'fechaActualizacion'])) ||
+          (!esAutor(resource.data.idDueno) && resource.data.estadoActual == 'Publicado' &&
+            request.resource.data.estadoActual == 'Pendiente' && request.resource.data.idReclamante == request.auth.uid &&
+            texto(request.resource.data.fotoPruebaUrl, 1, 2048) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'estadoActual', 'idReclamante', 'nombreReclamante', 'fotoPruebaUrl', 'fechaActualizacion'])) ||
+          (esAutor(resource.data.idDueno) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'estadoActual', 'fechaActualizacion', 'soloLectura', 'idReclamante', 'nombreReclamante', 'fotoPruebaUrl']) && (
+              (resource.data.estadoActual == 'Pendiente' && request.resource.data.estadoActual == 'Confirmado' &&
+                request.resource.data.idReclamante == resource.data.idReclamante &&
+                request.resource.data.nombreReclamante == resource.data.nombreReclamante &&
+                request.resource.data.fotoPruebaUrl == resource.data.fotoPruebaUrl && request.resource.data.soloLectura == false) ||
+              (resource.data.estadoActual == 'Confirmado' && request.resource.data.estadoActual == 'Entregado' &&
+                request.resource.data.idReclamante == resource.data.idReclamante &&
+                request.resource.data.nombreReclamante == resource.data.nombreReclamante &&
+                request.resource.data.fotoPruebaUrl == resource.data.fotoPruebaUrl && request.resource.data.soloLectura == true) ||
+              (resource.data.estadoActual in ['Pendiente', 'Confirmado'] && request.resource.data.estadoActual == 'Publicado' &&
+                request.resource.data.idReclamante == null && request.resource.data.nombreReclamante == null &&
+                request.resource.data.fotoPruebaUrl == null && request.resource.data.soloLectura == false)
+            ))
+        );
+      allow delete: if esAutor(resource.data.idDueno) && resource.data.estadoActual == 'Publicado';
+    }
+
+    function chatValido(d) {
+      return d.keys().hasOnly(['idReferencia', 'tituloReferencia', 'participantes',
+          'nombresParticipantes', 'soloLectura', 'tipoReferencia', 'ultimoMensaje', 'fechaUltimoMensaje']) &&
+        texto(d.idReferencia, 1, 1500) && texto(d.get('tituloReferencia', ''), 0, 200) &&
+        d.participantes is list && d.participantes.size() == 2 &&
+        texto(d.participantes[0], 1, 128) && texto(d.participantes[1], 1, 128) &&
+        d.participantes[0] != d.participantes[1] &&
+        d.nombresParticipantes is map && d.nombresParticipantes.keys().hasOnly(d.participantes) &&
+        texto(d.nombresParticipantes.get(d.participantes[0], ''), 0, 120) &&
+        texto(d.nombresParticipantes.get(d.participantes[1], ''), 0, 120) &&
+        d.soloLectura is bool && d.tipoReferencia in ['favor', 'objeto'] &&
+        texto(d.ultimoMensaje, 0, 5000) && d.fechaUltimoMensaje is timestamp;
+    }
+    function participantesCorrectos(d) {
+      let f = /databases/$(database)/documents/favores/$(d.idReferencia);
+      let o = /databases/$(database)/documents/objetos/$(d.idReferencia);
+      return (d.tipoReferencia == 'favor' &&
+          get(f).data.idAutor in d.participantes && get(f).data.idAyudante in d.participantes) ||
+        (d.tipoReferencia == 'objeto' &&
+          get(o).data.idDueno in d.participantes && get(o).data.idReclamante in d.participantes);
+    }
+    function referenciaCerrada(d) {
+      return (d.tipoReferencia == 'favor' &&
+          get(/databases/$(database)/documents/favores/$(d.idReferencia)).data.estado in ['Entregado', 'Cancelado']) ||
+        (d.tipoReferencia == 'objeto' &&
+          get(/databases/$(database)/documents/objetos/$(d.idReferencia)).data.estadoActual == 'Entregado');
+    }
+    function participanteChat(chatId) {
+      return autenticado() && request.auth.uid in
+        get(/databases/$(database)/documents/chats/$(chatId)).data.participantes;
+    }
+    match /chats/{chatId} {
+      allow read: if autenticado() && request.auth.uid in resource.data.participantes;
+      allow create: if autenticado() && chatValido(request.resource.data) &&
+        request.auth.uid in request.resource.data.participantes &&
+        request.resource.data.soloLectura == false && participantesCorrectos(request.resource.data);
+      allow update: if autenticado() && request.auth.uid in resource.data.participantes &&
+        chatValido(request.resource.data) && (
+          (resource.data.soloLectura == false && !referenciaCerrada(resource.data) &&
+            participantesCorrectos(resource.data) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ultimoMensaje', 'fechaUltimoMensaje'])) ||
+          (request.resource.data.soloLectura == true && referenciaCerrada(resource.data) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['soloLectura']))
+        );
+      allow delete: if false;
+      match /mensajes/{mensajeId} {
+        allow read: if participanteChat(chatId);
+        allow create: if participanteChat(chatId) &&
+          get(/databases/$(database)/documents/chats/$(chatId)).data.soloLectura == false &&
+          !referenciaCerrada(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+          participantesCorrectos(get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+          request.resource.data.keys().hasOnly(['chatId', 'idEmisor', 'nombreEmisor', 'texto',
+            'urlFoto', 'timestamp', 'esSistema', 'leido']) &&
+          request.resource.data.chatId == chatId && request.resource.data.idEmisor == request.auth.uid &&
+          texto(request.resource.data.nombreEmisor, 0, 120) && texto(request.resource.data.texto, 0, 5000) &&
+          (request.resource.data.urlFoto == null || imagen(request.resource.data.urlFoto)) &&
+          (request.resource.data.texto.size() > 0 || texto(request.resource.data.urlFoto, 1, 2048)) &&
+          request.resource.data.timestamp == request.time && request.resource.data.esSistema == false &&
+          request.resource.data.leido == false;
+        allow update, delete: if false;
+      }
+    }
+
+    function evaluacionValida(d, id) {
+      let favor = get(/databases/$(database)/documents/favores/$(d.idFavor)).data;
+      return d.keys().hasOnly(['id', 'idFavor', 'idAutor', 'idDestinatario', 'estrellas', 'comentario', 'fechaCreacion']) &&
+        texto(d.idFavor, 1, 1500) && d.id == id && d.idAutor == request.auth.uid &&
+        texto(d.idDestinatario, 1, 128) && d.estrellas is int && d.estrellas >= 1 && d.estrellas <= 5 &&
+        texto(d.comentario, 0, 2000) && d.fechaCreacion == request.time &&
+        id == d.idFavor + '_' + request.auth.uid && favor.estado == 'Entregado' &&
+        favor.calificacionHabilitada == true && d.idAutor != d.idDestinatario && (
+          (favor.idAutor == request.auth.uid && favor.idAyudante == d.idDestinatario) ||
+          (favor.idAyudante == request.auth.uid && favor.idAutor == d.idDestinatario));
+    }
+    match /calificaciones/{id} {
+      allow read: if autenticado();
+      allow create: if autenticado() && evaluacionValida(request.resource.data, id);
+      allow update, delete: if false;
+    }
+    match /reportes/{id} {
+      allow read: if autenticado() && resource.data.idReportante == request.auth.uid;
+      allow create: if autenticado() &&
+        request.resource.data.keys().hasOnly(['id', 'idFavor', 'idReportante', 'idReportado', 'motivo', 'descripcion', 'estado', 'fechaCreacion']) &&
+        request.resource.data.id == id && request.resource.data.idReportante == request.auth.uid &&
+        texto(request.resource.data.idReportado, 1, 128) && request.resource.data.idReportado != request.auth.uid &&
+        texto(request.resource.data.idFavor, 1, 1500) &&
+        exists(/databases/$(database)/documents/favores/$(request.resource.data.idFavor)) &&
+        texto(request.resource.data.motivo, 1, 120) && texto(request.resource.data.descripcion, 0, 5000) &&
+        request.resource.data.estado == 'Pendiente' && request.resource.data.fechaCreacion is timestamp;
+      allow update, delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

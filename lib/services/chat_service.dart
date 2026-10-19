@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+
 import '../models/chat_model.dart';
 import '../models/mensaje_model.dart';
 
@@ -20,16 +22,22 @@ class ChatService {
     required String usuarioBId,
     required String usuarioBNombre,
   }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || ![usuarioAId, usuarioBId].contains(uid)) {
+      throw Exception('Debes participar en el chat para abrirlo.');
+    }
     // Buscar si ya existe un chat para este objeto/favor entre estos dos participantes
     final query = await _chatsCol
         .where('idReferencia', isEqualTo: idReferencia)
         .where('tipoReferencia', isEqualTo: tipoReferencia)
-        .where('participantes', arrayContains: usuarioAId)
+        .where('participantes', arrayContains: uid)
         .get();
 
     for (final doc in query.docs) {
       final chat = ChatModel.fromMap(doc.data(), doc.id);
-      if (chat.participantes.contains(usuarioBId)) {
+      if (chat.participantes.contains(usuarioAId) &&
+          chat.participantes.contains(usuarioBId) &&
+          !chat.soloLectura) {
         return chat;
       }
     }
@@ -63,10 +71,10 @@ class ChatService {
         .orderBy('timestamp', descending: false)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => MensajeModel.fromMap(doc.data(), doc.id))
-          .toList();
-    });
+          return snapshot.docs
+              .map((doc) => MensajeModel.fromMap(doc.data(), doc.id))
+              .toList();
+        });
   }
 
   /// 3. Stream en tiempo real del estado de la sala (para modo solo lectura en vivo)
@@ -86,6 +94,10 @@ class ChatService {
     String? urlFoto,
     bool esSistema = false,
   }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || idEmisor != uid) {
+      throw Exception('Solo puedes enviar mensajes desde tu propia cuenta.');
+    }
     final chatDoc = await _chatsCol.doc(chatId).get();
     if (!chatDoc.exists || chatDoc.data() == null) {
       throw Exception('La sala de chat no existe.');
@@ -118,13 +130,17 @@ class ChatService {
       texto: texto.trim(),
       urlFoto: urlFoto,
       timestamp: DateTime.now(),
-      esSistema: esSistema,
+      // Los avisos automáticos del cliente también conservan la autoría real.
+      esSistema: false,
       leido: false,
     );
 
     // Guardar mensaje y actualizar último mensaje del chat
     final batch = _firestore.batch();
-    batch.set(nuevoMsgDoc, mensaje.toMap());
+    batch.set(nuevoMsgDoc, {
+      ...mensaje.toMap(),
+      'timestamp': FieldValue.serverTimestamp(),
+    });
     batch.update(_chatsCol.doc(chatId), {
       'ultimoMensaje': urlFoto != null && urlFoto.isNotEmpty
           ? '📷 Foto adjunta'
@@ -141,15 +157,16 @@ class ChatService {
     required String tipoReferencia,
   }) async {
     try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
       final query = await _chatsCol
           .where('idReferencia', isEqualTo: idReferencia)
           .where('tipoReferencia', isEqualTo: tipoReferencia)
+          .where('participantes', arrayContains: uid)
           .get();
 
       for (final doc in query.docs) {
-        await doc.reference.update({
-          'soloLectura': true,
-        });
+        await doc.reference.update({'soloLectura': true});
       }
     } catch (e) {
       debugPrint('Error cerrando chats de referencia: $e');

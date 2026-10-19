@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/chat_model.dart';
 import '../models/favor_model.dart';
@@ -49,10 +50,15 @@ class FirestoreDataService {
       _chats.doc(chat.id).set(chat.toMap());
 
   Stream<List<ChatModel>> escucharChats() {
-    return _chats.snapshots().map(
-      (snapshot) => snapshot.docs
-          .map((doc) => ChatModel.fromMap(doc.data(), doc.id))
-          .toList(),
-    );
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(const <ChatModel>[]);
+    return _chats
+        .where('participantes', arrayContains: uid)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => ChatModel.fromMap(doc.data(), doc.id))
+              .toList(),
+        );
   }
 }

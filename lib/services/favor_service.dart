@@ -1,6 +1,8 @@
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+
 import '../config/app_constants.dart';
 import '../models/favor_model.dart';
 import '../models/calificacion_model.dart';
@@ -15,12 +17,13 @@ class FavorService {
   FavorService({
     FirebaseFirestore? firestore,
     CloudinaryService? cloudinaryService,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _cloudinaryService = cloudinaryService ?? CloudinaryService();
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _cloudinaryService = cloudinaryService ?? CloudinaryService();
 
   CollectionReference get _favoresRef => _firestore.collection('favores');
   CollectionReference get _usuariosRef => _firestore.collection('usuarios');
-  CollectionReference get _calificacionesRef => _firestore.collection('calificaciones');
+  CollectionReference get _calificacionesRef =>
+      _firestore.collection('calificaciones');
   CollectionReference get _reportesRef => _firestore.collection('reportes');
 
   // ==========================================
@@ -145,11 +148,15 @@ class FavorService {
       final estadoActual = data['estado'];
 
       if (favorAyudanteDoc != idAyudante) {
-        throw Exception('Solo el ayudante asignado a este favor puede confirmar el pago.');
+        throw Exception(
+          'Solo el ayudante asignado a este favor puede confirmar el pago.',
+        );
       }
 
       if (estadoActual != 'Aceptado') {
-        throw Exception('El favor debe estar en estado "Aceptado" para entregar.');
+        throw Exception(
+          'El favor debe estar en estado "Aceptado" para entregar.',
+        );
       }
 
       // Cambiar estado a "Entregado" y habilitar calificación (RF08)
@@ -169,7 +176,7 @@ class FavorService {
   // ==========================================
   // RF09: SISTEMA DE CALIFICACIÓN Y REPORTES
   // ==========================================
-  /// Registra una calificación (1 a 5 estrellas) y recalcula el promedio del usuario calificado
+  /// Una calificación por participante y favor, sin editar el perfil ajeno.
   Future<void> calificarUsuario({
     required String favorId,
     required String idAutorCalificador,
@@ -181,7 +188,7 @@ class FavorService {
       throw Exception('La calificación debe ser entre 1 y 5 estrellas.');
     }
 
-    final newDoc = _calificacionesRef.doc();
+    final newDoc = _calificacionesRef.doc('${favorId}_$idAutorCalificador');
     final calificacion = CalificacionModel(
       id: newDoc.id,
       idFavor: favorId,
@@ -192,33 +199,16 @@ class FavorService {
       fechaCreacion: DateTime.now(),
     );
 
-    // Guardar la calificación y recalcular el promedio del destinatario en transacción
+    // El promedio se obtiene al consultar las calificaciones del perfil.
     await _firestore.runTransaction((transaction) async {
-      final destinatarioRef = _usuariosRef.doc(idDestinatario);
-      final destinatarioSnap = await transaction.get(destinatarioRef);
-
-      if (destinatarioSnap.exists) {
-        // Consultar todas las calificaciones de este usuario para sacar el nuevo promedio
-        final prevCalificacionesQuery = await _calificacionesRef
-            .where('idDestinatario', isEqualTo: idDestinatario)
-            .get();
-
-        int totalEstrellas = estrellas;
-        int totalConteo = 1;
-
-        for (var doc in prevCalificacionesQuery.docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          totalEstrellas += (data['estrellas'] as num).toInt();
-          totalConteo++;
-        }
-
-        final nuevoPromedio = double.parse((totalEstrellas / totalConteo).toStringAsFixed(1));
-
-        transaction.set(newDoc, calificacion.toMap());
-        transaction.update(destinatarioRef, {
-          'promedio': nuevoPromedio,
-        });
+      final anterior = await transaction.get(newDoc);
+      if (anterior.exists) {
+        throw Exception('Ya calificaste este favor.');
       }
+      transaction.set(newDoc, {
+        ...calificacion.toMap(),
+        'fechaCreacion': FieldValue.serverTimestamp(),
+      });
     });
   }
 
@@ -251,7 +241,7 @@ class FavorService {
   /// Obtiene favores publicados por un usuario que lleven más de 24 horas sin aceptar y no hayan sido avisados
   Future<List<FavorModel>> obtenerFavoresExpiradosAutor(String idAutor) async {
     final hace24Horas = DateTime.now().subtract(const Duration(hours: 24));
-    
+
     final query = await _favoresRef
         .where('idAutor', isEqualTo: idAutor)
         .where('estado', isEqualTo: 'Publicado')
@@ -260,7 +250,10 @@ class FavorService {
         .get();
 
     return query.docs
-        .map((doc) => FavorModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+        .map(
+          (doc) =>
+              FavorModel.fromMap(doc.data() as Map<String, dynamic>, doc.id),
+        )
         .toList();
   }
 
