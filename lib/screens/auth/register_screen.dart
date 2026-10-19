@@ -166,7 +166,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 ),
                                 SizedBox(height: 5),
                                 Text(
-                                  'Únete a la comunidad USC y aprovecha todos los beneficios.',
+                                  'Únete a la comunidad USC y conecta con otros estudiantes.',
                                   style: TextStyle(
                                     color: _mutedBlue,
                                     fontSize: 11,

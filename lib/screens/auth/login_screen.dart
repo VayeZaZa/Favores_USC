@@ -16,7 +16,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  static const _navy = Color(0xFF111B43);
+  // Tono azul noche tomado del fondo de la ilustración del búho.
+  static const _navy = Color(0xFF0D1534);
   static const _panelBlue = Color(0xFF28365F);
   static const _softBlue = Color(0xFFA9BDE9);
   static const _gold = Color(0xFFFFD981);
@@ -152,7 +153,6 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: _navy,
       bottomNavigationBar: _AuthFooter(
-        asset: 'assets/images/footer inicio.png',
         backgroundColor: _navy,
       ),
       body: SafeArea(
@@ -167,13 +167,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: BoxDecoration(
                       color: _navy,
                       borderRadius: BorderRadius.circular(30),
-                      border: Border.all(
-                        color: _softBlue.withValues(alpha: 0.18),
-                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.22),
-                          blurRadius: 28,
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 24,
                           offset: const Offset(0, 14),
                         ),
                       ],
@@ -516,9 +513,8 @@ class _LoginHero extends StatelessWidget {
 }
 
 class _AuthFooter extends StatelessWidget {
-  const _AuthFooter({required this.asset, required this.backgroundColor});
+  const _AuthFooter({required this.backgroundColor});
 
-  final String asset;
   final Color backgroundColor;
 
   @override
@@ -530,11 +526,6 @@ class _AuthFooter extends StatelessWidget {
         child: SizedBox(
           height: 112,
           width: double.infinity,
-          child: Image.asset(
-            asset,
-            fit: BoxFit.cover,
-            alignment: Alignment.bottomCenter,
-          ),
         ),
       ),
     );
