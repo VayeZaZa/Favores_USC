@@ -109,6 +109,13 @@ class ObjetoModel {
     return estadoEnum.puedeTransicionarA(nuevo, esRechazo: esRechazo);
   }
 
+  /// La autorización y la transición se evalúan sobre la misma versión leída.
+  bool permiteAccion(String usuarioId, String estado, {bool esRechazo = false}) {
+    if (usuarioId.isEmpty || usuarioId != idDueno ||
+        !EstadoObjeto.values.any((e) => e.valor == estado)) return false;
+    return validarCambioEstado(estado, esRechazo: esRechazo);
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'idDueno': idDueno,

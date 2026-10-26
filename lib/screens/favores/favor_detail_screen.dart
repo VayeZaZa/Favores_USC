@@ -8,6 +8,7 @@ import '../../config/app_theme.dart';
 import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
+import '../chat/chat_room_screen.dart';
 
 /// Pantalla de Consultar / Detalle del Favor ajustada 100% a la maqueta visual (image8.png, image9.png)
 class FavorDetailScreen extends ConsumerStatefulWidget {
@@ -21,6 +22,19 @@ class FavorDetailScreen extends ConsumerStatefulWidget {
 
 class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
   bool _isProcessing = false;
+
+  void _abrirChat(FavorModel favor, {String? ayudanteId}) {
+    final uid = AuthService().currentUser?.uid;
+    final asignado = ayudanteId ?? favor.idAyudante;
+    if (uid == null || asignado == null) return;
+    final esAutor = uid == favor.idAutor;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(
+      idReferencia: favor.id, tipoReferencia: 'favor',
+      tituloReferencia: favor.titulo,
+      otroUsuarioId: esAutor ? asignado : favor.idAutor,
+      otroUsuarioNombre: esAutor ? 'Ayudante' : favor.nombreAutor,
+    )));
+  }
 
   void _mostrarDialogoCalificacion(BuildContext context, FavorModel favor) {
     int estrellas = 5;
@@ -243,6 +257,7 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
       await favorService.aceptarFavor(favorId: favor.id, idAyudante: currentUser.uid);
 
       if (mounted) {
+        _abrirChat(favor, ayudanteId: currentUser.uid);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('¡Favor aceptado exitosamente! Ya puedes coordinar la entrega.'),
@@ -508,11 +523,8 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                     // Botón "Chat con Solicitante" (Mockup image8.png)
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Abriendo Chat de la comunidad...')),
-                          );
-                        },
+                        onPressed: favor.idAyudante != null && (esAutor || esAyudante)
+                            ? () => _abrirChat(favor) : null,
                         icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
                         label: const Text(
                           'Chat',

@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/favor_model.dart';
+import '../models/objeto_model.dart';
 import '../models/chat_model.dart';
+import '../models/chat_access.dart';
 import '../models/mensaje_model.dart';
 
 /// Servicio de Firestore para Chat en Tiempo Real 1-a-1 (RF07)
@@ -20,22 +23,54 @@ class ChatService {
     required String usuarioBId,
     required String usuarioBNombre,
   }) async {
-    // Buscar si ya existe un chat para este objeto/favor entre estos dos participantes
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || (uid != usuarioAId && uid != usuarioBId) ||
+        usuarioAId.isEmpty || usuarioBId.isEmpty || usuarioAId == usuarioBId) {
+      throw StateError('No tienes acceso a esta conversación.');
+    }
+    if (tipoReferencia != 'favor' && tipoReferencia != 'objeto') {
+      throw StateError('Referencia de chat inválida.');
+    }
+    final referencia = await _firestore.collection(
+      tipoReferencia == 'favor' ? 'favores' : 'objetos',
+    ).doc(idReferencia).get();
+    if (!referencia.exists) throw StateError('La publicación ya no existe.');
+    final data = referencia.data()!;
+    final participantes = tipoReferencia == 'favor'
+        ? [FavorModel.fromMap(data, referencia.id).idAutor,
+           FavorModel.fromMap(data, referencia.id).idAyudante]
+        : [ObjetoModel.fromMap(data, referencia.id).idDueno,
+           ObjetoModel.fromMap(data, referencia.id).idReclamante];
+    if (!participantes.contains(usuarioAId) || !participantes.contains(usuarioBId)) {
+      throw StateError('Solo los participantes asignados pueden abrir el chat.');
+    }
+    if (tipoReferencia == 'favor' && data['estado'] == 'Publicado') {
+      throw StateError('Primero debes aceptar el favor.');
+    }
+    final actualChatId = data['chatId'] as String?;
+    if (actualChatId != null) {
+      final actual = await _chatsCol.doc(actualChatId).get();
+      if (!actual.exists) throw StateError('No se encontró el chat de este caso.');
+      final chat = ChatModel.fromMap(actual.data()!, actual.id);
+      if (!chat.participantes.contains(usuarioAId) ||
+          !chat.participantes.contains(usuarioBId)) {
+        throw StateError('Los participantes del chat no coinciden.');
+      }
+      return chat;
+    }
+    // Compatibilidad con publicaciones anteriores que todavía no guardan chatId.
     final query = await _chatsCol
         .where('idReferencia', isEqualTo: idReferencia)
-        .where('tipoReferencia', isEqualTo: tipoReferencia)
-        .where('participantes', arrayContains: usuarioAId)
-        .get();
-
+        .where('tipoReferencia', isEqualTo: tipoReferencia).get();
     for (final doc in query.docs) {
       final chat = ChatModel.fromMap(doc.data(), doc.id);
-      if (chat.participantes.contains(usuarioBId)) {
-        return chat;
-      }
+      if (chat.participantes.contains(usuarioAId) &&
+          chat.participantes.contains(usuarioBId)) return chat;
     }
 
     // Si no existe, crear la sala exclusiva 1-a-1
-    final nuevoDoc = _chatsCol.doc();
+    final ids = [usuarioAId, usuarioBId]..sort();
+    final nuevoDoc = _chatsCol.doc(Uri.encodeComponent('$tipoReferencia|$idReferencia|${ids.join('|')}'));
     final nuevoChat = ChatModel(
       id: nuevoDoc.id,
       idReferencia: idReferencia,
@@ -51,8 +86,25 @@ class ChatService {
       fechaUltimoMensaje: DateTime.now(),
     );
 
-    await nuevoDoc.set(nuevoChat.toMap());
-    return nuevoChat;
+    return _firestore.runTransaction((tx) async {
+      final source = await tx.get(referencia.reference);
+      if (!source.exists) throw StateError('La publicación ya no existe.');
+      final current = source.data()!;
+      final miembros = tipoReferencia == 'favor'
+          ? [FavorModel.fromMap(current, source.id).idAutor,
+             FavorModel.fromMap(current, source.id).idAyudante]
+          : [ObjetoModel.fromMap(current, source.id).idDueno,
+             ObjetoModel.fromMap(current, source.id).idReclamante];
+      if (!miembros.contains(usuarioAId) || !miembros.contains(usuarioBId) ||
+          current['chatId'] != null) {
+        throw StateError('La publicación cambió. Vuelve a abrir el chat.');
+      }
+      final actual = await tx.get(nuevoDoc);
+      if (actual.exists) return ChatModel.fromMap(actual.data()!, actual.id);
+      tx.set(nuevoDoc, nuevoChat.toMap());
+      tx.update(referencia.reference, {'chatId': nuevoDoc.id});
+      return nuevoChat;
+    });
   }
 
   /// 2. Stream en tiempo real de los mensajes de una sala (RF07)
@@ -86,53 +138,45 @@ class ChatService {
     String? urlFoto,
     bool esSistema = false,
   }) async {
-    final chatDoc = await _chatsCol.doc(chatId).get();
-    if (!chatDoc.exists || chatDoc.data() == null) {
-      throw Exception('La sala de chat no existe.');
+    if (FirebaseAuth.instance.currentUser?.uid != idEmisor) {
+      throw StateError('El emisor no coincide con la sesión actual.');
     }
-
-    final chat = ChatModel.fromMap(chatDoc.data()!, chatDoc.id);
-
-    // Validación estricta de emisor (RF07): Solo los 2 participantes autorizados pueden escribir
-    if (!chat.participantes.contains(idEmisor)) {
-      throw Exception(
-        'Acceso denegado: El usuario no pertenece a esta sala de chat privada (RF07).',
-      );
-    }
-
-    // Validación de modo Solo Lectura cuando el caso se cierra (RF07)
-    if (chat.soloLectura) {
-      throw Exception(
-        'Este caso ha sido cerrado. El chat se encuentra en modo solo lectura (RF07).',
-      );
-    }
-
-    final mensajesCol = _chatsCol.doc(chatId).collection('mensajes');
-    final nuevoMsgDoc = mensajesCol.doc();
-
-    final mensaje = MensajeModel(
-      id: nuevoMsgDoc.id,
-      chatId: chatId,
-      idEmisor: idEmisor,
-      nombreEmisor: nombreEmisor,
-      texto: texto.trim(),
-      urlFoto: urlFoto,
-      timestamp: DateTime.now(),
-      esSistema: esSistema,
-      leido: false,
-    );
-
-    // Guardar mensaje y actualizar último mensaje del chat
-    final batch = _firestore.batch();
-    batch.set(nuevoMsgDoc, mensaje.toMap());
-    batch.update(_chatsCol.doc(chatId), {
-      'ultimoMensaje': urlFoto != null && urlFoto.isNotEmpty
-          ? '📷 Foto adjunta'
-          : texto.trim(),
-      'fechaUltimoMensaje': FieldValue.serverTimestamp(),
+    if (esSistema) throw StateError('Los mensajes de prueba se crean con el reclamo.');
+    if (texto.trim().isEmpty && (urlFoto == null || urlFoto.isEmpty)) return;
+    final chatRef = _chatsCol.doc(chatId);
+    await _firestore.runTransaction((tx) async {
+      final chatDoc = await tx.get(chatRef);
+      if (!chatDoc.exists) throw StateError('La sala de chat no existe.');
+      final chat = ChatModel.fromMap(chatDoc.data()!, chatDoc.id);
+      if (!chat.participantes.contains(idEmisor) || chat.soloLectura) {
+        throw StateError('No puedes escribir en esta conversación.');
+      }
+      final ref = _firestore.collection(
+        chat.tipoReferencia == 'favor' ? 'favores' : 'objetos',
+      ).doc(chat.idReferencia);
+      final source = await tx.get(ref);
+      if (!source.exists) throw StateError('La publicación ya no existe.');
+      final data = source.data()!;
+      if (!ChatAccess.puedeEscribir(
+        chat: chat, usuarioId: idEmisor, chatActualId: data['chatId'] as String?,
+        favor: chat.tipoReferencia == 'favor'
+            ? FavorModel.fromMap(data, source.id) : null,
+        objeto: chat.tipoReferencia == 'objeto'
+            ? ObjetoModel.fromMap(data, source.id) : null,
+      )) {
+        throw StateError('El caso está cerrado o la prueba aún no está confirmada.');
+      }
+      final msg = chatRef.collection('mensajes').doc();
+      tx.set(msg, MensajeModel(
+        id: msg.id, chatId: chatId, idEmisor: idEmisor,
+        nombreEmisor: nombreEmisor, texto: texto.trim(), urlFoto: urlFoto,
+        timestamp: DateTime.now(),
+      ).toMap()..['timestamp'] = FieldValue.serverTimestamp());
+      tx.update(chatRef, {
+        'ultimoMensaje': urlFoto != null ? 'Foto adjunta' : texto.trim(),
+        'fechaUltimoMensaje': FieldValue.serverTimestamp(),
+      });
     });
-
-    await batch.commit();
   }
 
   /// 5. Cierra la sala cambiando a modo solo lectura cuando el caso culmina (RF07)
@@ -140,7 +184,6 @@ class ChatService {
     required String idReferencia,
     required String tipoReferencia,
   }) async {
-    try {
       final query = await _chatsCol
           .where('idReferencia', isEqualTo: idReferencia)
           .where('tipoReferencia', isEqualTo: tipoReferencia)
@@ -151,8 +194,5 @@ class ChatService {
           'soloLectura': true,
         });
       }
-    } catch (e) {
-      debugPrint('Error cerrando chats de referencia: $e');
-    }
   }
 }

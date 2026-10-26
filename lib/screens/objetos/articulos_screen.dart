@@ -443,29 +443,17 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
             children: [
               // Botón de Chat (RF07): Abre sala 1-a-1
               InkWell(
-                onTap: () {
-                  if (esDueno) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Este objeto fue reportado por ti.'),
-                      ),
-                    );
-                    return;
-                  }
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChatRoomScreen(
-                        idReferencia: objeto.id,
-                        tipoReferencia: 'objeto',
-                        tituloReferencia: objeto.titulo,
-                        otroUsuarioId: objeto.idDueno,
-                        otroUsuarioNombre: objeto.nombreDueno.isNotEmpty
-                            ? objeto.nombreDueno
-                            : 'Reportante',
-                      ),
-                    ),
-                  );
+                onTap: objeto.idReclamante == null ||
+                    (!esDueno && objeto.idReclamante != AuthService().currentUser?.uid)
+                    ? null : () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(
+                    idReferencia: objeto.id, tipoReferencia: 'objeto',
+                    tituloReferencia: objeto.titulo,
+                    otroUsuarioId: esDueno ? objeto.idReclamante! : objeto.idDueno,
+                    otroUsuarioNombre: esDueno
+                        ? (objeto.nombreReclamante ?? 'Reclamante')
+                        : objeto.nombreDueno,
+                  )));
                 },
                 borderRadius: BorderRadius.circular(12),
                 child: Container(

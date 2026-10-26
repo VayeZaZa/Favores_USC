@@ -6,9 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../config/app_theme.dart';
 import '../../models/chat_model.dart';
+import '../../models/chat_access.dart';
 import '../../models/mensaje_model.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/objeto_provider.dart';
+import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/cloudinary_service.dart';
 
@@ -47,6 +49,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   String? _chatId;
   bool _isLoadingChat = true;
   bool _isSending = false;
+  String? _errorChat;
 
   @override
   void initState() {
@@ -63,7 +66,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   Future<void> _inicializarSala() async {
     final user = AuthService().currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() { _isLoadingChat = false; _errorChat = 'Debes iniciar sesión.'; });
+      return;
+    }
 
     try {
       final chatService = ref.read(chatServiceProvider);
@@ -89,7 +95,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoadingChat = false);
+        setState(() { _isLoadingChat = false; _errorChat = e.toString(); });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error abriendo chat: $e'),
@@ -108,7 +114,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     final texto = _textoController.text.trim();
     if (texto.isEmpty && (urlFoto == null || urlFoto.isEmpty)) return;
 
-    _textoController.clear();
     setState(() => _isSending = true);
 
     try {
@@ -125,6 +130,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         urlFoto: urlFoto,
       );
 
+      if (mounted && _textoController.text.trim() == texto) _textoController.clear();
+      if (!mounted) return;
       // Auto-scroll al final
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
@@ -188,6 +195,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         idObjeto: widget.idReferencia,
         nuevoEstadoStr: nuevoEstado,
         idUsuarioAccion: user.uid,
+        chatIdEsperado: _chatId!,
         esRechazo: esRechazo,
       );
 
@@ -219,6 +227,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     final miUid = currentUser?.uid ?? '';
 
     // Si aún está cargando la sala
+    if (_errorChat != null) {
+      return Scaffold(appBar: AppBar(title: const Text('Chat')),
+        body: Center(child: Padding(padding: const EdgeInsets.all(24),
+          child: Text(_errorChat!))));
+    }
     if (_isLoadingChat || _chatId == null) {
       return Scaffold(
         appBar: AppBar(
@@ -236,7 +249,14 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         : null;
 
     final chat = chatAsync.value;
-    final esSoloLectura = chat?.soloLectura ?? false;
+    final favorAsync = widget.tipoReferencia == 'favor'
+        ? ref.watch(favorDetailStreamProvider(widget.idReferencia)) : null;
+    final objeto = objetoAsync?.value;
+    final favor = favorAsync?.value;
+    final pendiente = objeto?.esPendiente ?? false;
+    final esSoloLectura = chat == null || !ChatAccess.puedeEscribir(
+      chat: chat, usuarioId: miUid, favor: favor, objeto: objeto,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -295,8 +315,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
-                    esSoloLectura ? 'Caso Finalizado' : 'En línea • USC',
+                  Flexible(child: Text(
+                    pendiente ? 'Prueba pendiente de revisión'
+                        : esSoloLectura ? 'Solo lectura' : 'Conversación habilitada',
                     style: TextStyle(
                       fontSize: 12,
                       color: esSoloLectura ? const Color(0xFFEF4444) : const Color(0xFF64748B),
@@ -309,7 +330,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         ),
         actions: [
           // Menú de opciones de la máquina de estados si el usuario es el dueño (RF13)
-          if (objetoAsync?.value != null && objetoAsync!.value!.idDueno == miUid)
+          if (objetoAsync?.value != null && objetoAsync!.value!.idDueno == miUid &&
+              chat != null && chat.participantes.contains(objetoAsync.value!.idReclamante) &&
+              !chat.soloLectura)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Color(0xFF1E293B)),
               onSelected: (valor) {
@@ -414,18 +437,21 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               color: const Color(0xFFFEE2E2),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.lock_outline, color: Color(0xFFDC2626), size: 18),
                   SizedBox(width: 8),
-                  Text(
-                    'Caso finalizado. El chat está en modo solo lectura.',
+                  Flexible(child: Text(
+                    pendiente
+                        ? 'Esperando confirmación del dueño.'
+                        : 'Conversación en modo solo lectura.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xFFDC2626),
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                    ),
+                    )),
                   ),
                 ],
               ),

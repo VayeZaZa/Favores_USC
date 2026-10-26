@@ -1,14 +1,15 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/objeto_model.dart';
-import 'chat_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/chat_model.dart';
+import '../models/mensaje_model.dart';
 import 'cloudinary_service.dart';
 
 /// Servicio de Firestore para la gestión del ciclo de vida de Objetos (RF07, RF10, RF11, RF12, RF13)
 class ObjetoService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final CloudinaryService _cloudinaryService = CloudinaryService();
-  final ChatService _chatService = ChatService();
 
   CollectionReference<Map<String, dynamic>> get _objetosCol =>
       _firestore.collection('objetos');
@@ -111,6 +112,9 @@ class ObjetoService {
     required File fotoPrueba,
     String? mensajeAdicional,
   }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != idReclamante) {
+      throw StateError('Debes iniciar sesión con la cuenta reclamante.');
+    }
     // Validación de foto de prueba obligatoria
     final urlPrueba = await _cloudinaryService.subirImagenObjeto(
       fotoPrueba,
@@ -123,6 +127,8 @@ class ObjetoService {
       );
     }
 
+    final chatRef = _firestore.collection('chats').doc();
+    final mensajeRef = chatRef.collection('mensajes').doc();
     // Transacción atómica en Firestore para garantizar bloqueo y evitar condiciones de carrera
     await _firestore.runTransaction((transaction) async {
       final docRef = _objetosCol.doc(idObjeto);
@@ -145,9 +151,24 @@ class ObjetoService {
         );
       }
 
+      transaction.set(chatRef, ChatModel(
+        id: chatRef.id, idReferencia: idObjeto, tipoReferencia: 'objeto',
+        tituloReferencia: objeto.titulo,
+        participantes: [objeto.idDueno, idReclamante],
+        nombresParticipantes: {objeto.idDueno: objeto.nombreDueno,
+          idReclamante: nombreReclamante},
+        ultimoMensaje: 'Foto de prueba pendiente de confirmación',
+      ).toMap());
+      transaction.set(mensajeRef, MensajeModel(
+        id: mensajeRef.id, chatId: chatRef.id, idEmisor: idReclamante,
+        nombreEmisor: nombreReclamante,
+        texto: 'Foto de prueba. ${mensajeAdicional?.trim() ?? ""}',
+        urlFoto: urlPrueba, timestamp: DateTime.now(), esSistema: true,
+      ).toMap()..['timestamp'] = FieldValue.serverTimestamp());
       // Máquina de estados: Publicado -> Pendiente
       transaction.update(docRef, {
         'estadoActual': EstadoObjeto.pendiente.valor,
+        'chatId': chatRef.id,
         'idReclamante': idReclamante,
         'nombreReclamante': nombreReclamante,
         'fotoPruebaUrl': urlPrueba,
@@ -155,34 +176,6 @@ class ObjetoService {
       });
     });
 
-    // Leer el objeto actualizado para obtener el dueño
-    final objetoActualizado = await obtenerObjetoPorId(idObjeto);
-    if (objetoActualizado != null) {
-      // 5. Crear sala de chat exclusiva 1-a-1 (RF07)
-      final chat = await _chatService.obtenerOCrearChat1a1(
-        idReferencia: idObjeto,
-        tipoReferencia: 'objeto',
-        tituloReferencia: objetoActualizado.titulo,
-        usuarioAId: objetoActualizado.idDueno,
-        usuarioANombre: objetoActualizado.nombreDueno,
-        usuarioBId: idReclamante,
-        usuarioBNombre: nombreReclamante,
-      );
-
-      // 6. Mensaje automático con la foto de prueba al dueño (RF12)
-      final textoNotif = mensajeAdicional != null && mensajeAdicional.isNotEmpty
-          ? '📸 [Reclamación de Objeto]: "$mensajeAdicional"'
-          : '📸 [Reclamación de Objeto]: He adjuntado una fotografía como prueba para verificar la entrega.';
-
-      await _chatService.enviarMensaje(
-        chatId: chat.id,
-        idEmisor: idReclamante,
-        nombreEmisor: nombreReclamante,
-        texto: textoNotif,
-        urlFoto: urlPrueba,
-        esSistema: true,
-      );
-    }
   }
 
   /// 7. Control estricto de la máquina de estados del objeto (RF13)
@@ -192,50 +185,45 @@ class ObjetoService {
     required String idObjeto,
     required String nuevoEstadoStr,
     required String idUsuarioAccion,
+    required String chatIdEsperado,
     bool esRechazo = false,
   }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != idUsuarioAccion) {
+      throw StateError('La sesión no coincide con el usuario de la acción.');
+    }
+    const estados = ['Publicado', 'Pendiente', 'Confirmado', 'Entregado'];
+    if (!estados.contains(nuevoEstadoStr)) throw StateError('Estado inválido.');
     final docRef = _objetosCol.doc(idObjeto);
-    final snapshot = await docRef.get();
-
-    if (!snapshot.exists || snapshot.data() == null) {
-      throw Exception('El objeto especificado no existe.');
-    }
-
-    final objeto = ObjetoModel.fromMap(snapshot.data()!, snapshot.id);
-    final nuevoEstado = EstadoObjeto.fromString(nuevoEstadoStr);
-
-    // Validación estricta de la máquina de estados
-    if (!objeto.validarCambioEstado(nuevoEstadoStr, esRechazo: esRechazo)) {
-      throw StateError(
-        'Transición no permitida: de "${objeto.estadoActual}" a "$nuevoEstadoStr". (RF13)',
-      );
-    }
-
-    Map<String, dynamic> actualizacion = {
-      'estadoActual': nuevoEstado.valor,
-      'fechaActualizacion': FieldValue.serverTimestamp(),
-    };
-
-    // Si es un retroceso a Publicado (por rechazo o no entrega), se libera el reclamante
-    if (nuevoEstado == EstadoObjeto.publicado && esRechazo) {
-      actualizacion['idReclamante'] = null;
-      actualizacion['nombreReclamante'] = null;
-      actualizacion['fotoPruebaUrl'] = null;
-    }
-
-    // Si pasa a Entregado, el caso se cierra terminalmente (RF13, RF07)
-    if (nuevoEstado == EstadoObjeto.entregado) {
-      actualizacion['soloLectura'] = true;
-    }
-
-    await docRef.update(actualizacion);
-
-    // Actualizar chat asociado a solo lectura si se entrega (RF07)
-    if (nuevoEstado == EstadoObjeto.entregado) {
-      await _chatService.cerrarChatDeReferencia(
-        idReferencia: idObjeto,
-        tipoReferencia: 'objeto',
-      );
-    }
+    await _firestore.runTransaction((tx) async {
+      final snapshot = await tx.get(docRef);
+      if (!snapshot.exists) throw StateError('El objeto ya no existe.');
+      if (snapshot.data()!['chatId'] != null &&
+          snapshot.data()!['chatId'] != chatIdEsperado) {
+        throw StateError('Este reclamo cambió. Abre la conversación actual.');
+      }
+      final objeto = ObjetoModel.fromMap(snapshot.data()!, snapshot.id);
+      if (objeto.idDueno != idUsuarioAccion) {
+        throw StateError('Solo el dueño de la publicación puede gestionar la entrega.');
+      }
+      if (!objeto.permiteAccion(idUsuarioAccion, nuevoEstadoStr, esRechazo: esRechazo)) {
+        throw StateError('Transición no permitida desde ${objeto.estadoActual}.');
+      }
+      final cambios = <String, dynamic>{
+        'estadoActual': nuevoEstadoStr,
+        'fechaActualizacion': FieldValue.serverTimestamp(),
+        'soloLectura': nuevoEstadoStr == 'Entregado',
+      };
+      if (nuevoEstadoStr == 'Publicado') {
+        cambios.addAll({'idReclamante': null, 'nombreReclamante': null,
+          'fotoPruebaUrl': null, 'chatId': null});
+      }
+      tx.update(docRef, cambios);
+      final chatId = snapshot.data()!['chatId'] as String?;
+      if (chatId != null) {
+        tx.update(_firestore.collection('chats').doc(chatId), {
+          'soloLectura': nuevoEstadoStr == 'Publicado' || nuevoEstadoStr == 'Entregado',
+        });
+      }
+    });
   }
 }

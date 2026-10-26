@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../config/app_constants.dart';
 import '../models/favor_model.dart';
+import '../models/chat_model.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/calificacion_model.dart';
 import '../models/reporte_model.dart';
 import 'cloudinary_service.dart';
@@ -90,6 +92,9 @@ class FavorService {
     required String favorId,
     required String idAyudante,
   }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != idAyudante) {
+      throw StateError('Debes iniciar sesión con la cuenta del ayudante.');
+    }
     final favorDocRef = _favoresRef.doc(favorId);
 
     await _firestore.runTransaction((transaction) async {
@@ -101,7 +106,8 @@ class FavorService {
 
       final data = snapshot.data() as Map<String, dynamic>;
       final estadoActual = data['estado'] ?? 'Publicado';
-      final idAutor = data['idAutor'] ?? '';
+      final favor = FavorModel.fromMap(data, favorId);
+      final idAutor = favor.idAutor;
 
       // Regla de Negocio: El autor no puede aceptar su propio favor (RF05)
       if (idAutor == idAyudante) {
@@ -109,16 +115,27 @@ class FavorService {
       }
 
       // Control de Concurrencia (RF05): Verificar estado en la transacción
-      if (estadoActual != 'Publicado') {
+      if (estadoActual != 'Publicado' || favor.idAyudante != null) {
         throw Exception(
           '¡Ups! Este favor ya fue aceptado por otro estudiante o no está disponible.',
         );
       }
 
+      final ids = [idAutor, idAyudante]..sort();
+      final chatRef = _firestore.collection('chats').doc(
+        Uri.encodeComponent('favor|$favorId|${ids.join('|')}'),
+      );
+      transaction.set(chatRef, ChatModel(
+        id: chatRef.id, idReferencia: favorId, tipoReferencia: 'favor',
+        tituloReferencia: favor.titulo, participantes: [idAutor, idAyudante],
+        nombresParticipantes: {idAutor: favor.nombreAutor,
+          idAyudante: FirebaseAuth.instance.currentUser?.displayName ?? 'Ayudante'},
+      ).toMap());
       // Actualización atómica del favor
       transaction.update(favorDocRef, {
         'estado': 'Aceptado',
         'idAyudante': idAyudante,
+        'chatId': chatRef.id,
       });
     });
   }
@@ -131,6 +148,9 @@ class FavorService {
     required String favorId,
     required String idAyudante,
   }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != idAyudante) {
+      throw StateError('Debes iniciar sesión con la cuenta del ayudante.');
+    }
     final favorDocRef = _favoresRef.doc(favorId);
 
     await _firestore.runTransaction((transaction) async {
@@ -141,7 +161,7 @@ class FavorService {
       }
 
       final data = snapshot.data() as Map<String, dynamic>;
-      final favorAyudanteDoc = data['idAyudante'];
+      final favorAyudanteDoc = FavorModel.fromMap(data, favorId).idAyudante;
       final estadoActual = data['estado'];
 
       if (favorAyudanteDoc != idAyudante) {
@@ -152,10 +172,17 @@ class FavorService {
         throw Exception('El favor debe estar en estado "Aceptado" para entregar.');
       }
 
+      final chatId = data['chatId'] as String?;
+      if (chatId != null) {
+        transaction.update(_firestore.collection('chats').doc(chatId), {
+          'soloLectura': true,
+        });
+      }
       // Cambiar estado a "Entregado" y habilitar calificación (RF08)
       transaction.update(favorDocRef, {
         'estado': 'Entregado',
         'calificacionHabilitada': true,
+        'soloLectura': true,
       });
 
       // Incrementar contador de favores completados del ayudante (RF14)
