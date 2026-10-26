@@ -1,10 +1,19 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { DIA, requiereAviso, eventoId, avisoVigente } = require("../policy");
+const { DIA, requiereAviso, eventoId, avisoVigente, demoraReintento } = require("../policy");
 const ahora = 1800000000000;
 const fecha = (ms, nanos = 0) => ({ seconds: Math.floor(ms / 1000), nanoseconds: nanos, toMillis: () => ms });
 const favor = (cambios = {}) => ({ estado: "Publicado", idAutor: "autor", fechaCreacion: fecha(ahora - DIA), ...cambios });
+
+test("los reintentos crecen por horas con límite de un día", () => {
+  const hora = DIA / 24;
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 100].map(demoraReintento),
+    [1, 2, 4, 8, 16, 24, 24].map((n) => n * hora));
+  for (const valor of [undefined, null, NaN, Infinity, -1, 0, 1.5, "2"]) {
+    assert.equal(demoraReintento(valor), hora);
+  }
+});
 
 test("24 horas exactas son elegibles y un favor reciente no", () => {
   assert.equal(requiereAviso(favor(), ahora), true);
