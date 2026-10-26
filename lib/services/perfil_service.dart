@@ -75,6 +75,33 @@ class PerfilService {
     return url;
   }
 
+  Future<void> actualizarDatosPersonales({
+    required String uid,
+    required String programa,
+    required int semestre,
+    required String telefono,
+  }) async {
+    final programaLimpio = programa.trim();
+    final telefonoLimpio = telefono.trim();
+
+    if (programaLimpio.isEmpty || programaLimpio.length > 120) {
+      throw ArgumentError('Escribe un programa válido.');
+    }
+    if (semestre < 1 || semestre > 20) {
+      throw ArgumentError('Selecciona un semestre válido.');
+    }
+    if (telefonoLimpio.length > 30) {
+      throw ArgumentError('El teléfono no puede superar 30 caracteres.');
+    }
+
+    await _perfilRef(uid).update({
+      'programa': programaLimpio,
+      'semestre': semestre,
+      'telefono': telefonoLimpio,
+      'phone_number': telefonoLimpio,
+    });
+  }
+
   Future<List<FavorModel>> cargarFavores(String uid) async {
     final resultados = await Future.wait([
       _firestore.collection('favores').where('idAutor', isEqualTo: uid).get(),

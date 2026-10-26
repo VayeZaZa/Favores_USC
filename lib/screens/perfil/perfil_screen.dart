@@ -77,6 +77,39 @@ class _PerfilScreenState extends State<PerfilScreen> {
     }
   }
 
+  Future<void> _editarDatosPersonales({
+    required String programa,
+    required int semestre,
+    required String telefono,
+  }) async {
+    final uid = _uid;
+    if (uid == null) return;
+
+    final guardado = await showDialog<bool>(
+      context: context,
+      builder: (_) => _EditarPerfilDialog(
+        programa: programa,
+        semestre: semestre,
+        telefono: telefono,
+        onGuardar: (programa, semestre, telefono) =>
+            _perfilService.actualizarDatosPersonales(
+              uid: uid,
+              programa: programa,
+              semestre: semestre,
+              telefono: telefono,
+            ),
+      ),
+    );
+
+    if (guardado != true || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Tu información se guardó correctamente.'),
+        backgroundColor: AppTheme.successColor,
+      ),
+    );
+  }
+
   Future<void> _cerrarSesion() async {
     if (_cerrandoSesion) return;
     setState(() => _cerrandoSesion = true);
@@ -185,6 +218,27 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     ),
                     const Divider(color: Colors.white12, height: 20),
                     _dato(Icons.phone_outlined, 'Teléfono', telefono),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => _editarDatosPersonales(
+                          programa: _texto(perfil['programa']),
+                          semestre: semestre,
+                          telefono: _texto(
+                            perfil['phone_number'] ?? perfil['telefono'],
+                          ),
+                        ),
+                        icon: const Icon(Icons.edit_outlined, size: 17),
+                        label: const Text('Editar información'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: _gold,
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -634,6 +688,210 @@ class _PerfilScreenState extends State<PerfilScreen> {
     if (valor is List) return valor.whereType<String>().toList();
     if (valor is String && valor.isNotEmpty) return [valor];
     return const [];
+  }
+}
+
+class _EditarPerfilDialog extends StatefulWidget {
+  const _EditarPerfilDialog({
+    required this.programa,
+    required this.semestre,
+    required this.telefono,
+    required this.onGuardar,
+  });
+
+  final String programa;
+  final int semestre;
+  final String telefono;
+  final Future<void> Function(String programa, int semestre, String telefono)
+  onGuardar;
+
+  @override
+  State<_EditarPerfilDialog> createState() => _EditarPerfilDialogState();
+}
+
+class _EditarPerfilDialogState extends State<_EditarPerfilDialog> {
+  static const _navy = Color(0xFF111B43);
+  static const _panelBlue = Color(0xFF28365F);
+  static const _softBlue = Color(0xFFA9BDE9);
+  static const _gold = Color(0xFFFFD981);
+
+  final _formKey = GlobalKey<FormState>();
+  late final _programaController = TextEditingController(text: widget.programa);
+  late final _telefonoController = TextEditingController(text: widget.telefono);
+  late int _semestre = widget.semestre.clamp(1, 20).toInt();
+  bool _guardando = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _programaController.dispose();
+    _telefonoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+
+    try {
+      await widget.onGuardar(
+        _programaController.text,
+        _semestre,
+        _telefonoController.text,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = 'No se pudieron guardar los cambios. Intenta de nuevo.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  InputDecoration _decoracion(String etiqueta, IconData icono) {
+    return InputDecoration(
+      labelText: etiqueta,
+      labelStyle: const TextStyle(color: _softBlue),
+      prefixIcon: Icon(icono, color: _softBlue, size: 19),
+      filled: true,
+      fillColor: _navy.withValues(alpha: 0.45),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(15),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(15),
+        borderSide: const BorderSide(color: _gold, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(15),
+        borderSide: const BorderSide(color: AppTheme.errorColor),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(15),
+        borderSide: const BorderSide(color: AppTheme.errorColor, width: 1.5),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _panelBlue,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      title: const Text(
+        'Editar información',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+      ),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _programaController,
+                  enabled: !_guardando,
+                  textCapitalization: TextCapitalization.words,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _decoracion(
+                    'Programa académico',
+                    Icons.school_outlined,
+                  ),
+                  validator: (valor) {
+                    final texto = valor?.trim() ?? '';
+                    if (texto.isEmpty) return 'Escribe tu programa académico';
+                    if (texto.length > 120) return 'Máximo 120 caracteres';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<int>(
+                  initialValue: _semestre,
+                  isExpanded: true,
+                  dropdownColor: _navy,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _decoracion(
+                    'Semestre actual',
+                    Icons.calendar_month_outlined,
+                  ),
+                  items: List.generate(20, (index) => index + 1)
+                      .map(
+                        (semestre) => DropdownMenuItem(
+                          value: semestre,
+                          child: Text('Semestre $semestre'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _guardando
+                      ? null
+                      : (valor) {
+                          if (valor != null) setState(() => _semestre = valor);
+                        },
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _telefonoController,
+                  enabled: !_guardando,
+                  keyboardType: TextInputType.phone,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _decoracion(
+                    'Teléfono (opcional)',
+                    Icons.phone_outlined,
+                  ),
+                  validator: (valor) => (valor?.trim().length ?? 0) > 30
+                      ? 'Máximo 30 caracteres'
+                      : null,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _error!,
+                    style: const TextStyle(color: Color(0xFFFFC3C9)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _guardando ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar', style: TextStyle(color: _softBlue)),
+        ),
+        ElevatedButton(
+          onPressed: _guardando ? null : _guardar,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _gold,
+            foregroundColor: _navy,
+            shape: const StadiumBorder(),
+            textStyle: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          child: _guardando
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _navy,
+                  ),
+                )
+              : const Text('Guardar'),
+        ),
+      ],
+    );
   }
 }
 
