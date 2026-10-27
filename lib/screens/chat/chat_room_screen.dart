@@ -15,6 +15,8 @@ import '../../providers/objeto_provider.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../widgets/confirmar_objeto_dialog.dart';
+import '../../widgets/foto_prueba_view.dart';
 
 /// Pantalla de Sala de Chat 1-a-1 en Tiempo Real (RF07)
 /// Cumple con especificación del documento:
@@ -52,6 +54,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   bool _isLoadingChat = true;
   bool _isSending = false;
   String? _errorChat;
+  bool _isChangingState = false;
 
   @override
   void initState() {
@@ -196,8 +199,23 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     String nuevoEstado, {
     bool esRechazo = false,
   }) async {
+    if (_isChangingState || _chatId == null) return;
     final user = AuthService().currentUser;
-    if (user == null) return;
+    final objeto = ref.read(objetoDetalleProvider(widget.idReferencia)).value;
+    if (user == null || objeto == null || objeto.idDueno != user.uid) return;
+    // Conservar el estado que el dueño vio antes de abrir la confirmación.
+    final estadoEsperado = objeto.estadoActual;
+    setState(() => _isChangingState = true);
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (_) =>
+          ConfirmarObjetoDialog(nuevoEstado: nuevoEstado, esRechazo: esRechazo),
+    );
+    if (!mounted) return;
+    if (confirmado != true) {
+      setState(() => _isChangingState = false);
+      return;
+    }
 
     try {
       final objetoService = ref.read(objetoServiceProvider);
@@ -206,10 +224,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         nuevoEstadoStr: nuevoEstado,
         idUsuarioAccion: user.uid,
         chatIdEsperado: _chatId!,
-        estadoEsperado: ref
-            .read(objetoDetalleProvider(widget.idReferencia))
-            .value!
-            .estadoActual,
+        estadoEsperado: estadoEsperado,
         esRechazo: esRechazo,
       );
 
@@ -232,6 +247,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           backgroundColor: AppTheme.errorColor,
         ),
       );
+    } finally {
+      if (mounted) setState(() => _isChangingState = false);
     }
   }
 
@@ -371,6 +388,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               chat.participantes.contains(objetoAsync.value!.idReclamante) &&
               !chat.soloLectura)
             PopupMenuButton<String>(
+              enabled: !_isChangingState,
               icon: const Icon(Icons.more_vert, color: Color(0xFF1E293B)),
               onSelected: (valor) {
                 if (valor == 'confirmar') {
@@ -421,6 +439,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         children: [
           // NOTA: Se eliminó el cuadro de "Estado del Caso" superior para cumplir con el diseño exacto.
 
+          if (_isChangingState)
+            const LinearProgressIndicator(
+              semanticsLabel: 'Actualizando el estado del objeto',
+            ),
           // Lista de Mensajes en tiempo real (RF07)
           Expanded(
             child: mensajesAsync.when(
@@ -550,20 +572,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           ),
           if (mensaje.urlFoto != null && mensaje.urlFoto!.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: CachedNetworkImage(
-                imageUrl: mensaje.urlFoto!,
-                height: 140,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                placeholder: (_, __) => Container(
-                  height: 140,
-                  color: Colors.grey.shade200,
-                  child: const Center(child: CircularProgressIndicator()),
-                ),
-              ),
-            ),
+            FotoPruebaView(url: mensaje.urlFoto!),
           ],
         ],
       ),
