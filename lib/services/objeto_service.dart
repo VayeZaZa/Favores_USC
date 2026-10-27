@@ -1,15 +1,29 @@
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../models/objeto_model.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../models/chat_model.dart';
 import '../models/mensaje_model.dart';
 import 'cloudinary_service.dart';
 
 /// Servicio de Firestore para la gestión del ciclo de vida de Objetos (RF07, RF10, RF11, RF12, RF13)
 class ObjetoService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final CloudinaryService _cloudinaryService = CloudinaryService();
+  final FirebaseFirestore _firestore;
+  final CloudinaryService _cloudinaryService;
+  final String? Function() _usuarioActual;
+
+  ObjetoService({
+    FirebaseFirestore? firestore,
+    CloudinaryService? cloudinaryService,
+    String? Function()? usuarioActual,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _cloudinaryService = cloudinaryService ?? CloudinaryService(),
+       _usuarioActual =
+           usuarioActual ?? (() => FirebaseAuth.instance.currentUser?.uid);
 
   CollectionReference<Map<String, dynamic>> get _objetosCol =>
       _firestore.collection('objetos');
@@ -83,10 +97,9 @@ class ObjetoService {
       query = query.where('tipo', isEqualTo: filtroTipo.toLowerCase().trim());
     }
 
-    return query
-        .orderBy('fechaReporte', descending: true)
-        .snapshots()
-        .map((snapshot) {
+    return query.orderBy('fechaReporte', descending: true).snapshots().map((
+      snapshot,
+    ) {
       return snapshot.docs
           .map((doc) => ObjetoModel.fromMap(doc.data(), doc.id))
           .toList();
@@ -100,6 +113,15 @@ class ObjetoService {
     return ObjetoModel.fromMap(doc.data()!, doc.id);
   }
 
+  Stream<ObjetoModel?> observarObjeto(String id) => _objetosCol
+      .doc(id)
+      .snapshots()
+      .map(
+        (doc) => doc.exists && doc.data() != null
+            ? ObjetoModel.fromMap(doc.data()!, doc.id)
+            : null,
+      );
+
   /// 4. Reclamación de objeto: "Yo tengo el objeto" / "Es mío" (RF11, RF12)
   /// - Exige obligatoriamente foto de prueba para continuar.
   /// - Cambia de estado a "Pendiente" para bloquear las solicitudes de otros usuarios.
@@ -112,7 +134,7 @@ class ObjetoService {
     required File fotoPrueba,
     String? mensajeAdicional,
   }) async {
-    if (FirebaseAuth.instance.currentUser?.uid != idReclamante) {
+    if (_usuarioActual() != idReclamante) {
       throw StateError('Debes iniciar sesión con la cuenta reclamante.');
     }
     // Validación de foto de prueba obligatoria
@@ -151,20 +173,34 @@ class ObjetoService {
         );
       }
 
-      transaction.set(chatRef, ChatModel(
-        id: chatRef.id, idReferencia: idObjeto, tipoReferencia: 'objeto',
-        tituloReferencia: objeto.titulo,
-        participantes: [objeto.idDueno, idReclamante],
-        nombresParticipantes: {objeto.idDueno: objeto.nombreDueno,
-          idReclamante: nombreReclamante},
-        ultimoMensaje: 'Foto de prueba pendiente de confirmación',
-      ).toMap());
-      transaction.set(mensajeRef, MensajeModel(
-        id: mensajeRef.id, chatId: chatRef.id, idEmisor: idReclamante,
-        nombreEmisor: nombreReclamante,
-        texto: 'Foto de prueba. ${mensajeAdicional?.trim() ?? ""}',
-        urlFoto: urlPrueba, timestamp: DateTime.now(), esSistema: true,
-      ).toMap()..['timestamp'] = FieldValue.serverTimestamp());
+      transaction.set(
+        chatRef,
+        ChatModel(
+          id: chatRef.id,
+          idReferencia: idObjeto,
+          tipoReferencia: 'objeto',
+          tituloReferencia: objeto.titulo,
+          participantes: [objeto.idDueno, idReclamante],
+          nombresParticipantes: {
+            objeto.idDueno: objeto.nombreDueno,
+            idReclamante: nombreReclamante,
+          },
+          ultimoMensaje: 'Foto de prueba pendiente de confirmación',
+        ).toMap(),
+      );
+      transaction.set(
+        mensajeRef,
+        MensajeModel(
+          id: mensajeRef.id,
+          chatId: chatRef.id,
+          idEmisor: idReclamante,
+          nombreEmisor: nombreReclamante,
+          texto: 'Foto de prueba. ${mensajeAdicional?.trim() ?? ""}',
+          urlFoto: urlPrueba,
+          timestamp: DateTime.now(),
+          esSistema: true,
+        ).toMap()..['timestamp'] = FieldValue.serverTimestamp(),
+      );
       // Máquina de estados: Publicado -> Pendiente
       transaction.update(docRef, {
         'estadoActual': EstadoObjeto.pendiente.valor,
@@ -175,7 +211,6 @@ class ObjetoService {
         'fechaActualizacion': FieldValue.serverTimestamp(),
       });
     });
-
   }
 
   /// 7. Control estricto de la máquina de estados del objeto (RF13)
@@ -186,9 +221,10 @@ class ObjetoService {
     required String nuevoEstadoStr,
     required String idUsuarioAccion,
     required String chatIdEsperado,
+    required String estadoEsperado,
     bool esRechazo = false,
   }) async {
-    if (FirebaseAuth.instance.currentUser?.uid != idUsuarioAccion) {
+    if (_usuarioActual() != idUsuarioAccion) {
       throw StateError('La sesión no coincide con el usuario de la acción.');
     }
     const estados = ['Publicado', 'Pendiente', 'Confirmado', 'Entregado'];
@@ -197,16 +233,29 @@ class ObjetoService {
     await _firestore.runTransaction((tx) async {
       final snapshot = await tx.get(docRef);
       if (!snapshot.exists) throw StateError('El objeto ya no existe.');
+      if (snapshot.data()!['estadoActual'] != estadoEsperado) {
+        throw StateError(
+          'El estado cambió. Revisa el caso antes de continuar.',
+        );
+      }
       if (snapshot.data()!['chatId'] != null &&
           snapshot.data()!['chatId'] != chatIdEsperado) {
         throw StateError('Este reclamo cambió. Abre la conversación actual.');
       }
       final objeto = ObjetoModel.fromMap(snapshot.data()!, snapshot.id);
       if (objeto.idDueno != idUsuarioAccion) {
-        throw StateError('Solo el dueño de la publicación puede gestionar la entrega.');
+        throw StateError(
+          'Solo el dueño de la publicación puede gestionar la entrega.',
+        );
       }
-      if (!objeto.permiteAccion(idUsuarioAccion, nuevoEstadoStr, esRechazo: esRechazo)) {
-        throw StateError('Transición no permitida desde ${objeto.estadoActual}.');
+      if (!objeto.permiteAccion(
+        idUsuarioAccion,
+        nuevoEstadoStr,
+        esRechazo: esRechazo,
+      )) {
+        throw StateError(
+          'Transición no permitida desde ${objeto.estadoActual}.',
+        );
       }
       final cambios = <String, dynamic>{
         'estadoActual': nuevoEstadoStr,
@@ -214,14 +263,19 @@ class ObjetoService {
         'soloLectura': nuevoEstadoStr == 'Entregado',
       };
       if (nuevoEstadoStr == 'Publicado') {
-        cambios.addAll({'idReclamante': null, 'nombreReclamante': null,
-          'fotoPruebaUrl': null, 'chatId': null});
+        cambios.addAll({
+          'idReclamante': null,
+          'nombreReclamante': null,
+          'fotoPruebaUrl': null,
+          'chatId': null,
+        });
       }
       tx.update(docRef, cambios);
       final chatId = snapshot.data()!['chatId'] as String?;
       if (chatId != null) {
         tx.update(_firestore.collection('chats').doc(chatId), {
-          'soloLectura': nuevoEstadoStr == 'Publicado' || nuevoEstadoStr == 'Entregado',
+          'soloLectura':
+              nuevoEstadoStr == 'Publicado' || nuevoEstadoStr == 'Entregado',
         });
       }
     });

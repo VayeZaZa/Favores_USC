@@ -1,9 +1,11 @@
 import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+
 import '../../config/app_theme.dart';
 import '../../models/chat_model.dart';
 import '../../models/chat_access.dart';
@@ -67,15 +69,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   Future<void> _inicializarSala() async {
     final user = AuthService().currentUser;
     if (user == null) {
-      setState(() { _isLoadingChat = false; _errorChat = 'Debes iniciar sesión.'; });
+      setState(() {
+        _isLoadingChat = false;
+        _errorChat = 'Debes iniciar sesión.';
+      });
       return;
     }
 
     try {
       final chatService = ref.read(chatServiceProvider);
-      final miNombre = user.displayName ??
-          user.email?.split('@').first ??
-          'Estudiante USC';
+      final miNombre =
+          user.displayName ?? user.email?.split('@').first ?? 'Estudiante USC';
 
       final chat = await chatService.obtenerOCrearChat1a1(
         idReferencia: widget.idReferencia,
@@ -95,7 +99,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _isLoadingChat = false; _errorChat = e.toString(); });
+        setState(() {
+          _isLoadingChat = false;
+          _errorChat = e.toString();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error abriendo chat: $e'),
@@ -118,9 +125,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
     try {
       final chatService = ref.read(chatServiceProvider);
-      final miNombre = user.displayName ??
-          user.email?.split('@').first ??
-          'Estudiante USC';
+      final miNombre =
+          user.displayName ?? user.email?.split('@').first ?? 'Estudiante USC';
 
       await chatService.enviarMensaje(
         chatId: _chatId!,
@@ -130,7 +136,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         urlFoto: urlFoto,
       );
 
-      if (mounted && _textoController.text.trim() == texto) _textoController.clear();
+      if (mounted && _textoController.text.trim() == texto)
+        _textoController.clear();
       if (!mounted) return;
       // Auto-scroll al final
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -185,7 +192,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 
   // Opciones de gestión del estado del objeto (RF13) desde el menú contextual
-  Future<void> _gestionarEstadoObjeto(String nuevoEstado, {bool esRechazo = false}) async {
+  Future<void> _gestionarEstadoObjeto(
+    String nuevoEstado, {
+    bool esRechazo = false,
+  }) async {
     final user = AuthService().currentUser;
     if (user == null) return;
 
@@ -196,6 +206,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         nuevoEstadoStr: nuevoEstado,
         idUsuarioAccion: user.uid,
         chatIdEsperado: _chatId!,
+        estadoEsperado: ref
+            .read(objetoDetalleProvider(widget.idReferencia))
+            .value!
+            .estadoActual,
         esRechazo: esRechazo,
       );
 
@@ -228,9 +242,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
     // Si aún está cargando la sala
     if (_errorChat != null) {
-      return Scaffold(appBar: AppBar(title: const Text('Chat')),
-        body: Center(child: Padding(padding: const EdgeInsets.all(24),
-          child: Text(_errorChat!))));
+      return Scaffold(
+        appBar: AppBar(title: const Text('Chat')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(_errorChat!),
+          ),
+        ),
+      );
     }
     if (_isLoadingChat || _chatId == null) {
       return Scaffold(
@@ -250,13 +270,19 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
     final chat = chatAsync.value;
     final favorAsync = widget.tipoReferencia == 'favor'
-        ? ref.watch(favorDetailStreamProvider(widget.idReferencia)) : null;
+        ? ref.watch(favorDetailStreamProvider(widget.idReferencia))
+        : null;
     final objeto = objetoAsync?.value;
     final favor = favorAsync?.value;
     final pendiente = objeto?.esPendiente ?? false;
-    final esSoloLectura = chat == null || !ChatAccess.puedeEscribir(
-      chat: chat, usuarioId: miUid, favor: favor, objeto: objeto,
-    );
+    final esSoloLectura =
+        chat == null ||
+        !ChatAccess.puedeEscribir(
+          chat: chat,
+          usuarioId: miUid,
+          favor: favor,
+          objeto: objeto,
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -265,7 +291,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         elevation: 1,
         titleSpacing: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF1E293B), size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: Color(0xFF1E293B),
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -315,12 +345,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Flexible(child: Text(
-                    pendiente ? 'Prueba pendiente de revisión'
-                        : esSoloLectura ? 'Solo lectura' : 'Conversación habilitada',
+                  Text(
+                    pendiente
+                        ? 'Prueba pendiente de revisión'
+                        : esSoloLectura
+                        ? 'Solo lectura'
+                        : 'Conversación habilitada',
                     style: TextStyle(
                       fontSize: 12,
-                      color: esSoloLectura ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                      color: esSoloLectura
+                          ? const Color(0xFFEF4444)
+                          : const Color(0xFF64748B),
                     ),
                   ),
                 ],
@@ -330,8 +365,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         ),
         actions: [
           // Menú de opciones de la máquina de estados si el usuario es el dueño (RF13)
-          if (objetoAsync?.value != null && objetoAsync!.value!.idDueno == miUid &&
-              chat != null && chat.participantes.contains(objetoAsync.value!.idReclamante) &&
+          if (objetoAsync?.value != null &&
+              objetoAsync!.value!.idDueno == miUid &&
+              chat != null &&
+              chat.participantes.contains(objetoAsync.value!.idReclamante) &&
               !chat.soloLectura)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Color(0xFF1E293B)),
@@ -349,23 +386,31 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 final items = <PopupMenuEntry<String>>[];
 
                 if (obj.esPendiente) {
-                  items.add(const PopupMenuItem(
-                    value: 'confirmar',
-                    child: Text('✅ Aceptar prueba (Confirmado)'),
-                  ));
-                  items.add(const PopupMenuItem(
-                    value: 'rechazar',
-                    child: Text('❌ Rechazar prueba (Volver a Publicado)'),
-                  ));
+                  items.add(
+                    const PopupMenuItem(
+                      value: 'confirmar',
+                      child: Text('✅ Aceptar prueba (Confirmado)'),
+                    ),
+                  );
+                  items.add(
+                    const PopupMenuItem(
+                      value: 'rechazar',
+                      child: Text('❌ Rechazar prueba (Volver a Publicado)'),
+                    ),
+                  );
                 } else if (obj.esConfirmado) {
-                  items.add(const PopupMenuItem(
-                    value: 'entregar',
-                    child: Text('📦 Marcar como Entregado (Cerrar caso)'),
-                  ));
-                  items.add(const PopupMenuItem(
-                    value: 'rechazar',
-                    child: Text('↩ Cancelar entrega (Volver a Publicado)'),
-                  ));
+                  items.add(
+                    const PopupMenuItem(
+                      value: 'entregar',
+                      child: Text('📦 Marcar como Entregado (Cerrar caso)'),
+                    ),
+                  );
+                  items.add(
+                    const PopupMenuItem(
+                      value: 'rechazar',
+                      child: Text('↩ Cancelar entrega (Volver a Publicado)'),
+                    ),
+                  );
                 }
                 return items;
               },
@@ -391,14 +436,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   itemCount: mensajes.length + 1, // +1 para divisor "HOY"
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return Center(
                         child: Container(
                           margin: const EdgeInsets.symmetric(vertical: 12),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFFE2E8F0),
                             borderRadius: BorderRadius.circular(12),
@@ -442,16 +493,18 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 children: [
                   Icon(Icons.lock_outline, color: Color(0xFFDC2626), size: 18),
                   SizedBox(width: 8),
-                  Flexible(child: Text(
-                    pendiente
-                        ? 'Esperando confirmación del dueño.'
-                        : 'Conversación en modo solo lectura.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFFDC2626),
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    )),
+                  Flexible(
+                    child: Text(
+                      pendiente
+                          ? 'Esperando confirmación del dueño.'
+                          : 'Conversación en modo solo lectura.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFFDC2626),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -477,7 +530,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.info_outline, color: AppTheme.primaryColor, size: 18),
+              const Icon(
+                Icons.info_outline,
+                color: AppTheme.primaryColor,
+                size: 18,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -519,8 +576,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment:
-            esMio ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: esMio
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!esMio) ...[
@@ -560,10 +618,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 ],
               ),
               child: Column(
-                crossAxisAlignment:
-                    esMio ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                crossAxisAlignment: esMio
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
                 children: [
-                  if (mensaje.urlFoto != null && mensaje.urlFoto!.isNotEmpty) ...[
+                  if (mensaje.urlFoto != null &&
+                      mensaje.urlFoto!.isNotEmpty) ...[
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: CachedNetworkImage(
@@ -637,7 +697,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           children: [
             // Botón + para fotos (image6.jpeg)
             IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: AppTheme.primaryColor, size: 28),
+              icon: const Icon(
+                Icons.add_circle_outline,
+                color: AppTheme.primaryColor,
+                size: 28,
+              ),
               onPressed: _isSending ? null : _adjuntarFoto,
             ),
             Expanded(
@@ -654,7 +718,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
                     hintText: 'Escribe un mensaje...',
-                    hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                    hintStyle: TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 14,
+                    ),
                     border: InputBorder.none,
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(vertical: 10),
