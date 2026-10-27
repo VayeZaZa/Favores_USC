@@ -38,8 +38,16 @@ No sustituyen las pruebas de integración de las transacciones ni las reglas de 
 
 ## Estado de la verificación
 
-La máquina de trabajo no tiene Flutter/Dart disponible. Las pruebas se han
-preparado, pero todavía no se han ejecutado ni se ha compilado la aplicación.
+Se preparó Flutter 3.47.8 / Dart 3.13.7 dentro de work/ para esta revisión.
+Las pruebas de permisos, estados, reintentos, diálogos y ampliación de la evidencia
+se ejecutaron. El análisis estático de los archivos cambiados no tiene incidencias.
+
+La suite general conserva dos fallos en archivos ajenos a estos cambios:
+usuario_model_test.dart espera un campo ausente y widget_test.dart busca el botón
+Siguiente que la bienvenida actual no presenta. No se modificaron esos módulos.
+
+La contención real de Firestore todavía requiere ejecutar la prueba de integración
+descrita en RF13_pruebas.md. No se ha probado la app completa en un dispositivo.
 
 Los controles de sesión y estados incluidos se ejecutan en el cliente.
 La autorización frente a clientes modificados requiere reglas de Firestore

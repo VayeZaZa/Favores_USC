@@ -33,7 +33,8 @@ flutter test integration_test/objeto_concurrencia_test.dart -d EMULADOR --dart-d
 ```
 
 Reemplazar EMULADOR por el identificador de flutter devices. En un dispositivo
-físico, usar la dirección de la máquina accesible desde el teléfono.
+físico conectado por USB, ejecutar adb reverse tcp:8080 tcp:8080 y usar
+FIRESTORE_EMULATOR_HOST=127.0.0.1.
 La prueba confirma y rechaza simultáneamente el mismo caso y exige exactamente
 un ganador, con cinco casos aislados. Sin FIRESTORE_EMULATOR_HOST se omite.
 Solo usa el proyecto demo-favores-tests; no usa datos de producción.

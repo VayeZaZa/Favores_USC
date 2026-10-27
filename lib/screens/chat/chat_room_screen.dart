@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:uuid/uuid.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../config/app_theme.dart';
-import '../../models/chat_model.dart';
 import '../../models/chat_access.dart';
 import '../../models/mensaje_model.dart';
 import '../../providers/chat_provider.dart';
@@ -17,6 +17,7 @@ import '../../services/auth_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/confirmar_objeto_dialog.dart';
 import '../../widgets/foto_prueba_view.dart';
+import '../../widgets/chat_status_view.dart';
 
 /// Pantalla de Sala de Chat 1-a-1 en Tiempo Real (RF07)
 /// Cumple con especificación del documento:
@@ -55,6 +56,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   bool _isSending = false;
   String? _errorChat;
   bool _isChangingState = false;
+  bool _openingChat = false;
+  String? _pendingMessageId;
+  String? _pendingText;
+  String? _pendingFoto;
+  String? _sendError;
 
   @override
   void initState() {
@@ -70,8 +76,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 
   Future<void> _inicializarSala() async {
+    if (_openingChat) return;
+    _openingChat = true;
+    setState(() {
+      _isLoadingChat = true;
+      _errorChat = null;
+    });
     final user = AuthService().currentUser;
     if (user == null) {
+      _openingChat = false;
       setState(() {
         _isLoadingChat = false;
         _errorChat = 'Debes iniciar sesión.';
@@ -84,15 +97,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       final miNombre =
           user.displayName ?? user.email?.split('@').first ?? 'Estudiante USC';
 
-      final chat = await chatService.obtenerOCrearChat1a1(
-        idReferencia: widget.idReferencia,
-        tipoReferencia: widget.tipoReferencia,
-        tituloReferencia: widget.tituloReferencia,
-        usuarioAId: user.uid,
-        usuarioANombre: miNombre,
-        usuarioBId: widget.otroUsuarioId,
-        usuarioBNombre: widget.otroUsuarioNombre,
-      );
+      final chat = await chatService
+          .obtenerOCrearChat1a1(
+            idReferencia: widget.idReferencia,
+            tipoReferencia: widget.tipoReferencia,
+            tituloReferencia: widget.tituloReferencia,
+            usuarioAId: user.uid,
+            usuarioANombre: miNombre,
+            usuarioBId: widget.otroUsuarioId,
+            usuarioBNombre: widget.otroUsuarioNombre,
+          )
+          .timeout(const Duration(seconds: 20));
 
       if (mounted) {
         setState(() {
@@ -108,23 +123,38 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error abriendo chat: $e'),
+            content: const Text(
+              'No se pudo abrir el chat. Revisa tu conexión y tu sesión.',
+            ),
             backgroundColor: AppTheme.errorColor,
           ),
         );
       }
+    } finally {
+      _openingChat = false;
     }
   }
 
-  Future<void> _enviarMensaje({String? urlFoto}) async {
-    if (_chatId == null) return;
+  Future<void> _enviarMensaje({String? urlFoto, bool reintento = false}) async {
+    if (_chatId == null || _isSending) return;
     final user = AuthService().currentUser;
     if (user == null) return;
 
-    final texto = _textoController.text.trim();
-    if (texto.isEmpty && (urlFoto == null || urlFoto.isEmpty)) return;
+    // Un fallo conserva exactamente el mismo mensaje y su identificador.
+    if (_pendingMessageId != null && !reintento) return;
+    final texto = reintento
+        ? (_pendingText ?? '')
+        : _textoController.text.trim();
+    final foto = reintento ? _pendingFoto : urlFoto;
+    if (texto.isEmpty && (foto == null || foto.isEmpty)) return;
 
-    setState(() => _isSending = true);
+    setState(() {
+      _isSending = true;
+      _sendError = null;
+      _pendingMessageId ??= const Uuid().v4();
+      _pendingText = texto;
+      _pendingFoto = foto;
+    });
 
     try {
       final chatService = ref.read(chatServiceProvider);
@@ -136,11 +166,19 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         idEmisor: user.uid,
         nombreEmisor: miNombre,
         texto: texto,
-        urlFoto: urlFoto,
+        urlFoto: foto,
+        idMensaje: _pendingMessageId,
       );
 
-      if (mounted && _textoController.text.trim() == texto)
-        _textoController.clear();
+      if (mounted) {
+        if (_textoController.text.trim() == texto) _textoController.clear();
+        setState(() {
+          _pendingMessageId = null;
+          _pendingText = null;
+          _pendingFoto = null;
+          _sendError = null;
+        });
+      }
       if (!mounted) return;
       // Auto-scroll al final
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -154,9 +192,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      setState(() => _sendError = 'No se pudo enviar el mensaje.');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No se pudo enviar el mensaje: $e'),
+          content: const Text(
+            'No se pudo enviar. Conservamos el mensaje para reintentar.',
+          ),
           backgroundColor: AppTheme.errorColor,
         ),
       );
@@ -166,26 +207,34 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 
   Future<void> _adjuntarFoto() async {
+    if (_isSending || _pendingMessageId != null) return;
+    setState(() => _isSending = true);
     try {
       final picked = await _picker.pickImage(
         source: ImageSource.gallery,
         imageQuality: 80,
       );
-      if (picked == null) return;
-
-      setState(() => _isSending = true);
+      if (picked == null || !mounted) return;
       final subida = await _cloudinaryService.subirImagenObjeto(
         File(picked.path),
         folder: 'chat_adjuntos',
       );
 
-      if (subida != null && subida.isNotEmpty) {
-        await _enviarMensaje(urlFoto: subida);
+      if (!mounted) return;
+      if (subida == null || subida.isEmpty) {
+        throw StateError(
+          'No se pudo subir la foto. Puedes seleccionarla otra vez.',
+        );
       }
+      setState(() => _isSending = false);
+      await _enviarMensaje(urlFoto: subida);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error enviando foto: $e'),
+          content: const Text(
+            'No se pudo subir la foto. Puedes seleccionarla otra vez.',
+          ),
           backgroundColor: AppTheme.errorColor,
         ),
       );
@@ -201,7 +250,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }) async {
     if (_isChangingState || _chatId == null) return;
     final user = AuthService().currentUser;
-    final objeto = ref.read(objetoDetalleProvider(widget.idReferencia)).value;
+    final objeto = ref
+        .read(objetoDetalleProvider(widget.idReferencia))
+        .valueOrNull;
     if (user == null || objeto == null || objeto.idDueno != user.uid) return;
     // Conservar el estado que el dueño vio antes de abrir la confirmación.
     final estadoEsperado = objeto.estadoActual;
@@ -258,24 +309,19 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     final miUid = currentUser?.uid ?? '';
 
     // Si aún está cargando la sala
-    if (_errorChat != null) {
+    if (_errorChat != null || _isLoadingChat || _chatId == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Chat')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(_errorChat!),
-          ),
+        appBar: AppBar(title: Text(widget.otroUsuarioNombre)),
+        body: ChatStatusView(
+          cargando: _isLoadingChat,
+          titulo: _isLoadingChat
+              ? 'Abriendo conversación'
+              : 'No se pudo abrir el chat',
+          detalle: _isLoadingChat
+              ? ''
+              : 'Revisa tu conexión y tu sesión e inténtalo de nuevo.',
+          reintentar: _inicializarSala,
         ),
-      );
-    }
-    if (_isLoadingChat || _chatId == null) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.otroUsuarioNombre),
-          backgroundColor: Colors.white,
-        ),
-        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -285,21 +331,57 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         ? ref.watch(objetoDetalleProvider(widget.idReferencia))
         : null;
 
-    final chat = chatAsync.value;
+    final chat = chatAsync.valueOrNull;
     final favorAsync = widget.tipoReferencia == 'favor'
         ? ref.watch(favorDetailStreamProvider(widget.idReferencia))
         : null;
-    final objeto = objetoAsync?.value;
-    final favor = favorAsync?.value;
-    final pendiente = objeto?.esPendiente ?? false;
-    final esSoloLectura =
+    final objeto = objetoAsync?.valueOrNull;
+    final favor = favorAsync?.valueOrNull;
+    final estadoError =
+        chatAsync.hasError ||
+        (objetoAsync?.hasError ?? false) ||
+        (favorAsync?.hasError ?? false);
+    final estadoCargando =
+        chatAsync.isLoading ||
+        (objetoAsync?.isLoading ?? false) ||
+        (favorAsync?.isLoading ?? false);
+    void recargar() {
+      ref.invalidate(chatEstadoStreamProvider(_chatId!));
+      ref.invalidate(chatMensajesStreamProvider(_chatId!));
+      if (widget.tipoReferencia == 'objeto') {
+        ref.invalidate(objetoDetalleProvider(widget.idReferencia));
+      } else {
+        ref.invalidate(favorDetailStreamProvider(widget.idReferencia));
+      }
+    }
+
+    if (estadoError ||
+        estadoCargando ||
         chat == null ||
-        !ChatAccess.puedeEscribir(
-          chat: chat,
-          usuarioId: miUid,
-          favor: favor,
-          objeto: objeto,
-        );
+        (widget.tipoReferencia == 'objeto' ? objeto == null : favor == null)) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.otroUsuarioNombre)),
+        body: ChatStatusView(
+          cargando: estadoCargando && !estadoError,
+          titulo: estadoError
+              ? 'No se pudo actualizar la conversación'
+              : estadoCargando
+              ? 'Cargando conversación'
+              : 'El caso ya no está disponible',
+          detalle: estadoError
+              ? 'Revisa tu conexión y vuelve a intentarlo.'
+              : '',
+          reintentar: recargar,
+        ),
+      );
+    }
+    final pendiente = objeto?.esPendiente ?? false;
+    final esSoloLectura = !ChatAccess.puedeEscribir(
+      chat: chat,
+      usuarioId: miUid,
+      favor: favor,
+      objeto: objeto,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -320,7 +402,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             Stack(
               children: [
                 CircleAvatar(
-                  backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                  backgroundColor: AppTheme.primaryColor.withValues(
+                    alpha: 0.15,
+                  ),
                   radius: 20,
                   child: Text(
                     widget.otroUsuarioNombre.isNotEmpty
@@ -382,10 +466,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         ),
         actions: [
           // Menú de opciones de la máquina de estados si el usuario es el dueño (RF13)
-          if (objetoAsync?.value != null &&
-              objetoAsync!.value!.idDueno == miUid &&
-              chat != null &&
-              chat.participantes.contains(objetoAsync.value!.idReclamante) &&
+          if (objetoAsync?.valueOrNull != null &&
+              objetoAsync!.valueOrNull!.idDueno == miUid &&
+              chat.participantes.contains(
+                objetoAsync.valueOrNull!.idReclamante,
+              ) &&
               !chat.soloLectura)
             PopupMenuButton<String>(
               enabled: !_isChangingState,
@@ -400,7 +485,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 }
               },
               itemBuilder: (context) {
-                final obj = objetoAsync.value!;
+                final obj = objetoAsync.valueOrNull!;
                 final items = <PopupMenuEntry<String>>[];
 
                 if (obj.esPendiente) {
@@ -500,10 +585,32 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 );
               },
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
+              error: (e, _) => ChatStatusView(
+                titulo: 'No se pudieron cargar los mensajes',
+                detalle:
+                    'El historial se conserva. Puedes volver a intentarlo.',
+                reintentar: () =>
+                    ref.invalidate(chatMensajesStreamProvider(_chatId!)),
+              ),
             ),
           ),
 
+          if (_sendError != null)
+            MaterialBanner(
+              content: Text(
+                _pendingFoto == null
+                    ? 'Mensaje pendiente de envío.'
+                    : 'Foto pendiente de envío.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _isSending || esSoloLectura
+                      ? null
+                      : () => _enviarMensaje(reintento: true),
+                  child: const Text('Reintentar envío'),
+                ),
+              ],
+            ),
           // Barra inferior: Si está en Solo Lectura se deshabilita (RF07)
           if (esSoloLectura)
             Container(
@@ -620,7 +727,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    color: Colors.black.withValues(alpha: 0.04),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -658,7 +765,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     style: TextStyle(
                       fontSize: 10,
                       color: esMio
-                          ? Colors.white.withOpacity(0.7)
+                          ? Colors.white.withValues(alpha: 0.7)
                           : const Color(0xFF94A3B8),
                     ),
                   ),
@@ -670,7 +777,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             const SizedBox(width: 8),
             CircleAvatar(
               radius: 14,
-              backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
+              backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
               child: Text(
                 mensaje.nombreEmisor.isNotEmpty
                     ? mensaje.nombreEmisor[0].toUpperCase()
@@ -711,7 +818,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 color: AppTheme.primaryColor,
                 size: 28,
               ),
-              onPressed: _isSending ? null : _adjuntarFoto,
+              onPressed: _isSending || _pendingMessageId != null
+                  ? null
+                  : _adjuntarFoto,
             ),
             Expanded(
               child: Container(
@@ -722,6 +831,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 ),
                 child: TextField(
                   controller: _textoController,
+                  readOnly: _isSending || _pendingMessageId != null,
                   minLines: 1,
                   maxLines: 4,
                   textCapitalization: TextCapitalization.sentences,
@@ -742,7 +852,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             const SizedBox(width: 8),
             // Botón Enviar azul circular (image6.jpeg)
             InkWell(
-              onTap: _isSending ? null : () => _enviarMensaje(),
+              onTap: _isSending || _pendingMessageId != null
+                  ? null
+                  : () => _enviarMensaje(),
               borderRadius: BorderRadius.circular(24),
               child: Container(
                 width: 44,
