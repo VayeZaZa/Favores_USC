@@ -1,7 +1,7 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
-const { DIA, usuarioId, requiereAviso, eventoId, avisoVigente } = require("./policy");
+const { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento } = require("./policy");
 const HORA = DIA / 24;
 
 async function encolarAvisos(db, Timestamp, ahora) {
@@ -74,15 +74,18 @@ async function enviarAvisos(db, messaging, Timestamp, ahora, logger) {
         tx.update(doc.ref, { estado: "Pendiente", proximoIntento: Timestamp.fromMillis(ahora + HORA) });
         return null;
       }
+      const intentos = (Number.isSafeInteger(aviso.intentos) && aviso.intentos >= 0
+        ? aviso.intentos : 0) + 1;
       tx.update(doc.ref, {
-        estado: "Procesando", lease, intentos: (aviso.intentos || 0) + 1,
+        estado: "Procesando", lease, intentos,
         proximoIntento: Timestamp.fromMillis(ahora + 10 * 60 * 1000),
       });
-      return { aviso, token };
+      return { aviso, token, intentos };
     });
     if (!envio) continue;
+    let idMensaje;
     try {
-      const idMensaje = await messaging.send({
+      idMensaje = await messaging.send({
         token: envio.token,
         notification: {
           title: "Tu favor sigue disponible",
@@ -92,18 +95,24 @@ async function enviarAvisos(db, messaging, Timestamp, ahora, logger) {
         android: { notification: { tag: doc.id } },
         apns: { headers: { "apns-collapse-id": doc.id } },
       });
-      await finalizar(db, doc.ref, lease, {
-        estado: "Enviado", fechaEnvio: Timestamp.fromMillis(ahora), idMensaje,
-      });
     } catch (error) {
       const tokenInvalido = ["messaging/registration-token-not-registered", "messaging/invalid-registration-token"].includes(error.code);
       await finalizar(db, doc.ref, lease, {
         estado: tokenInvalido ? "TokenInvalido" : "Pendiente",
-        proximoIntento: Timestamp.fromMillis(ahora + HORA),
+        proximoIntento: Timestamp.fromMillis(ahora + demoraReintento(envio.intentos)),
         ultimoError: error.code || "envio-fallido",
       });
       logger.warn("No se pudo entregar una alerta de favor", { eventoId: doc.id, codigo: error.code });
+      continue;
     }
+    // Si FCM aceptó el mensaje pero Firestore falla al confirmarlo, mantener
+    // la reserva y propagar el error. No registrar un falso fallo de FCM.
+    // Tras vencer la reserva se podrá recuperar; la entrega sigue siendo
+    // al menos una vez y puede repetirse en esa ventana de incertidumbre.
+    await finalizar(db, doc.ref, lease, {
+      estado: "Enviado", fechaEnvio: Timestamp.fromMillis(ahora), idMensaje,
+      ultimoError: null,
+    });
   }
 }
 

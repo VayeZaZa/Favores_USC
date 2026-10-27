@@ -3,6 +3,13 @@
 const { createHash } = require("node:crypto");
 const DIA = 24 * 60 * 60 * 1000;
 
+// La tarea se ejecuta por horas. Los fallos consecutivos espacian los envíos
+// hasta un día, sin descartar una alerta por una caída temporal de FCM.
+function demoraReintento(intentos) {
+  const intento = Number.isSafeInteger(intentos) && intentos > 0 ? intentos : 1;
+  return Math.min(DIA, (DIA / 24) * 2 ** Math.min(intento - 1, 5));
+}
+
 function usuarioId(valor) {
   if (typeof valor === "string") return valor.split("/").at(-1);
   return valor?.id || "";
@@ -35,4 +42,4 @@ function avisoVigente(aviso, favor, ahora) {
     eventoId(aviso.idFavor, favor.fechaCreacion) === aviso.id;
 }
 
-module.exports = { DIA, usuarioId, requiereAviso, eventoId, avisoVigente };
+module.exports = { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento };
