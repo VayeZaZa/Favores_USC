@@ -49,12 +49,13 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
         source: source,
         imageQuality: 80,
       );
-      if (picked != null) {
+      if (picked != null && mounted) {
         setState(() {
           _fotoPrueba = File(picked.path);
         });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error seleccionando imagen: $e'),
@@ -177,7 +178,7 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(

@@ -79,61 +79,19 @@ class ChatService {
     }
     // Compatibilidad con publicaciones anteriores que todavía no guardan chatId.
     final query = await _chatsCol
-        .where('idReferencia', isEqualTo: idReferencia)
-        .where('tipoReferencia', isEqualTo: tipoReferencia)
+        .where('participantes', arrayContains: uid)
         .get();
     for (final doc in query.docs) {
       final chat = ChatModel.fromMap(doc.data(), doc.id);
-      if (chat.participantes.contains(usuarioAId) &&
+      if (chat.idReferencia == idReferencia &&
+          chat.tipoReferencia == tipoReferencia &&
+          chat.participantes.contains(usuarioAId) &&
           chat.participantes.contains(usuarioBId)) {
         return chat;
       }
     }
 
-    // Si no existe, crear la sala exclusiva 1-a-1
-    final ids = [usuarioAId, usuarioBId]..sort();
-    final nuevoDoc = _chatsCol.doc(
-      Uri.encodeComponent('$tipoReferencia|$idReferencia|${ids.join('|')}'),
-    );
-    final nuevoChat = ChatModel(
-      id: nuevoDoc.id,
-      idReferencia: idReferencia,
-      tituloReferencia: tituloReferencia,
-      participantes: [usuarioAId, usuarioBId],
-      nombresParticipantes: {
-        usuarioAId: usuarioANombre,
-        usuarioBId: usuarioBNombre,
-      },
-      soloLectura: false,
-      tipoReferencia: tipoReferencia,
-      ultimoMensaje: 'Chat iniciado',
-      fechaUltimoMensaje: DateTime.now(),
-    );
-
-    return _firestore.runTransaction((tx) async {
-      final source = await tx.get(referencia.reference);
-      if (!source.exists) throw StateError('La publicación ya no existe.');
-      final current = source.data()!;
-      final miembros = tipoReferencia == 'favor'
-          ? [
-              FavorModel.fromMap(current, source.id).idAutor,
-              FavorModel.fromMap(current, source.id).idAyudante,
-            ]
-          : [
-              ObjetoModel.fromMap(current, source.id).idDueno,
-              ObjetoModel.fromMap(current, source.id).idReclamante,
-            ];
-      if (!miembros.contains(usuarioAId) ||
-          !miembros.contains(usuarioBId) ||
-          current['chatId'] != null) {
-        throw StateError('La publicación cambió. Vuelve a abrir el chat.');
-      }
-      final actual = await tx.get(nuevoDoc);
-      if (actual.exists) return ChatModel.fromMap(actual.data()!, actual.id);
-      tx.set(nuevoDoc, nuevoChat.toMap());
-      tx.update(referencia.reference, {'chatId': nuevoDoc.id});
-      return nuevoChat;
-    });
+    throw StateError('No se encontró una sala vinculada a este caso.');
   }
 
   /// 2. Stream en tiempo real de los mensajes de una sala (RF07)
@@ -237,20 +195,5 @@ class ChatService {
         'fechaUltimoMensaje': FieldValue.serverTimestamp(),
       });
     });
-  }
-
-  /// 5. Cierra la sala cambiando a modo solo lectura cuando el caso culmina (RF07)
-  Future<void> cerrarChatDeReferencia({
-    required String idReferencia,
-    required String tipoReferencia,
-  }) async {
-    final query = await _chatsCol
-        .where('idReferencia', isEqualTo: idReferencia)
-        .where('tipoReferencia', isEqualTo: tipoReferencia)
-        .get();
-
-    for (final doc in query.docs) {
-      await doc.reference.update({'soloLectura': true});
-    }
   }
 }

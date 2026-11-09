@@ -39,11 +39,16 @@ class ObjetoService {
     required String titulo,
     required String descripcion,
     required String tipo, // 'perdido' o 'encontrado'
-    required String etiquetaColor,
     required String lugarCampus,
     File? imagenArchivo,
   }) async {
+    if (_usuarioActual() != idDueno) {
+      throw StateError('Inicia sesión para publicar un objeto.');
+    }
     final tipoNormalizado = tipo.toLowerCase().trim();
+    if (!['perdido', 'encontrado'].contains(tipoNormalizado)) {
+      throw ArgumentError('Elige si el objeto está perdido o encontrado.');
+    }
 
     // Validación RF10: Obligatoriedad de foto para objetos "encontrados"
     if (tipoNormalizado == 'encontrado' && imagenArchivo == null) {
@@ -60,9 +65,9 @@ class ObjetoService {
       );
       if (subida != null) {
         urlFoto = subida;
-      } else if (tipoNormalizado == 'encontrado') {
+      } else {
         throw Exception(
-          'No se pudo subir la foto obligatoria a Cloudinary. Revisa tu conexión.',
+          'No se pudo subir la foto. Revisa tu conexión y vuelve a intentarlo.',
         );
       }
     }
@@ -75,7 +80,7 @@ class ObjetoService {
       titulo: titulo.trim(),
       descripcion: descripcion.trim(),
       tipo: tipoNormalizado,
-      etiquetaColor: etiquetaColor,
+      etiquetaColor: tipoNormalizado == 'perdido' ? 'rojo' : 'verde',
       lugarCampus: lugarCampus,
       urlFoto: urlFoto,
       estadoActual: EstadoObjeto.publicado.valor,
@@ -150,7 +155,7 @@ class ObjetoService {
     }
 
     final chatRef = _firestore.collection('chats').doc();
-    final mensajeRef = chatRef.collection('mensajes').doc();
+    final mensajeRef = chatRef.collection('mensajes').doc('prueba');
     // Transacción atómica en Firestore para garantizar bloqueo y evitar condiciones de carrera
     await _firestore.runTransaction((transaction) async {
       final docRef = _objetosCol.doc(idObjeto);
@@ -207,7 +212,8 @@ class ObjetoService {
         'chatId': chatRef.id,
         'idReclamante': idReclamante,
         'nombreReclamante': nombreReclamante,
-        'fotoPruebaUrl': urlPrueba,
+        'fotoPruebaUrl':
+            null, // La evidencia solo se guarda en el chat privado.
         'fechaActualizacion': FieldValue.serverTimestamp(),
       });
     });

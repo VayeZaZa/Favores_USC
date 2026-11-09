@@ -1,7 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../../config/app_constants.dart';
 import '../../config/app_theme.dart';
 import '../../providers/objeto_provider.dart';
@@ -26,21 +28,11 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
   final _descripcionController = TextEditingController();
 
   String _tipoSeleccionado = 'perdido'; // 'perdido' | 'encontrado'
-  String _colorSeleccionado = 'rojo';
   String? _lugarSeleccionado;
   File? _imagenArchivo;
   bool _isLoading = false;
 
   final ImagePicker _picker = ImagePicker();
-
-  final List<Map<String, dynamic>> _coloresDisponibles = [
-    {'nombre': 'rojo', 'color': const Color(0xFFEF4444), 'label': 'Rojo'},
-    {'nombre': 'azul', 'color': const Color(0xFF3B82F6), 'label': 'Azul'},
-    {'nombre': 'verde', 'color': const Color(0xFF10B981), 'label': 'Verde'},
-    {'nombre': 'amarillo', 'color': const Color(0xFFF59E0B), 'label': 'Amarillo'},
-    {'nombre': 'morado', 'color': const Color(0xFF8B5CF6), 'label': 'Morado'},
-    {'nombre': 'negro', 'color': const Color(0xFF1E293B), 'label': 'Negro'},
-  ];
 
   @override
   void dispose() {
@@ -51,16 +43,14 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
 
   Future<void> _seleccionarFoto(ImageSource source) async {
     try {
-      final picked = await _picker.pickImage(
-        source: source,
-        imageQuality: 85,
-      );
-      if (picked != null) {
+      final picked = await _picker.pickImage(source: source, imageQuality: 85);
+      if (picked != null && mounted) {
         setState(() {
           _imagenArchivo = File(picked.path);
         });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error seleccionando imagen: $e'),
@@ -111,9 +101,8 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
 
     try {
       final objetoService = ref.read(objetoServiceProvider);
-      final nombreDueno = user.displayName ??
-          user.email?.split('@').first ??
-          'Estudiante USC';
+      final nombreDueno =
+          user.displayName ?? user.email?.split('@').first ?? 'Estudiante USC';
 
       await objetoService.publicarObjeto(
         idDueno: user.uid,
@@ -121,7 +110,6 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
         titulo: _tituloController.text.trim(),
         descripcion: _descripcionController.text.trim(),
         tipo: _tipoSeleccionado,
-        etiquetaColor: _colorSeleccionado,
         lugarCampus: _lugarSeleccionado!,
         imagenArchivo: _imagenArchivo,
       );
@@ -221,7 +209,9 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
               TextFormField(
                 controller: _tituloController,
                 decoration: InputDecoration(
-                  hintText: esEncontrado ? 'Ej: Calculadora Casio fx-570' : 'Ej: Llaves con llavero rojo',
+                  hintText: esEncontrado
+                      ? 'Ej: Calculadora Casio fx-570'
+                      : 'Ej: Llaves con llavero rojo',
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -238,58 +228,16 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
               ),
               const SizedBox(height: 20),
 
-              // 3. Etiquetado por Color (RF10)
-              const Text(
-                'Color representativo (Etiquetado)',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Color(0xFF1E293B),
+              Chip(
+                avatar: Icon(
+                  Icons.circle,
+                  size: 12,
+                  color: esEncontrado ? Colors.green : Colors.red,
                 ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 48,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _coloresDisponibles.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final item = _coloresDisponibles[index];
-                    final seleccionado = _colorSeleccionado == item['nombre'];
-                    return InkWell(
-                      onTap: () => setState(() => _colorSeleccionado = item['nombre']),
-                      borderRadius: BorderRadius.circular(24),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: seleccionado ? AppTheme.primaryColor.withOpacity(0.1) : Colors.white,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: seleccionado ? AppTheme.primaryColor : Colors.grey.shade300,
-                            width: seleccionado ? 2 : 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 8,
-                              backgroundColor: item['color'] as Color,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              item['label'] as String,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: seleccionado ? FontWeight.bold : FontWeight.normal,
-                                color: const Color(0xFF1E293B),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                label: Text(
+                  esEncontrado
+                      ? 'Encontrado · etiqueta verde'
+                      : 'Perdido · etiqueta roja',
                 ),
               ),
               const SizedBox(height: 20),
@@ -305,11 +253,14 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                value: _lugarSeleccionado,
+                initialValue: _lugarSeleccionado,
                 decoration: InputDecoration(
                   filled: true,
                   fillColor: Colors.white,
-                  prefixIcon: const Icon(Icons.location_on_outlined, color: AppTheme.primaryColor),
+                  prefixIcon: const Icon(
+                    Icons.location_on_outlined,
+                    color: AppTheme.primaryColor,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: Colors.grey.shade300),
@@ -317,7 +268,10 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
                 ),
                 hint: const Text('Selecciona punto del campus'),
                 items: AppConstants.puntosCampus.map((lugar) {
-                  return DropdownMenuItem(value: lugar, child: Text(lugar, style: const TextStyle(fontSize: 13.5)));
+                  return DropdownMenuItem(
+                    value: lugar,
+                    child: Text(lugar, style: const TextStyle(fontSize: 13.5)),
+                  );
                 }).toList(),
                 onChanged: (val) => setState(() => _lugarSeleccionado = val),
               ),
@@ -328,7 +282,9 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    esEncontrado ? 'Fotografía (Obligatoria) *' : 'Fotografía (Opcional)',
+                    esEncontrado
+                        ? 'Fotografía (Obligatoria) *'
+                        : 'Fotografía (Opcional)',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
@@ -367,8 +323,13 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
                         backgroundColor: Colors.black54,
                         radius: 18,
                         child: IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                          onPressed: () => setState(() => _imagenArchivo = null),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          onPressed: () =>
+                              setState(() => _imagenArchivo = null),
                         ),
                       ),
                     ),
@@ -380,7 +341,10 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () => _seleccionarFoto(ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt, color: AppTheme.primaryColor),
+                        icon: const Icon(
+                          Icons.camera_alt,
+                          color: AppTheme.primaryColor,
+                        ),
                         label: const Text('Cámara'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -394,7 +358,10 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () => _seleccionarFoto(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library, color: AppTheme.primaryColor),
+                        icon: const Icon(
+                          Icons.photo_library,
+                          color: AppTheme.primaryColor,
+                        ),
                         label: const Text('Galería'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -484,7 +451,7 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         decoration: BoxDecoration(
-          color: seleccionado ? colorActivo.withOpacity(0.08) : Colors.white,
+          color: seleccionado ? colorActivo.withValues(alpha: 0.08) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: seleccionado ? colorActivo : Colors.grey.shade200,
@@ -493,7 +460,11 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
         ),
         child: Column(
           children: [
-            Icon(icono, color: seleccionado ? colorActivo : const Color(0xFF64748B), size: 28),
+            Icon(
+              icono,
+              color: seleccionado ? colorActivo : const Color(0xFF64748B),
+              size: 28,
+            ),
             const SizedBox(height: 8),
             Text(
               label,
