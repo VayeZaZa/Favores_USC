@@ -16,19 +16,58 @@ class AppConstants {
   static const int maxFotosFavor = 3;
   static const int maxFotoSizeMB = 5;
 
-  // Puntos fijos del campus USC Pampalinda (RF03, RN04: sin GPS)
+  static const bloquesCampus = [
+    'Bloque 1',
+    'Bloque 2',
+    'Bloque 3',
+    'Bloque 4',
+    'Bloque 5',
+    'Bloque 6',
+    'Bloque 7',
+    'Bloque 8',
+  ];
+
+  static const zonasComidaDescanso = [
+    'Plazoleta de comidas',
+    'Plazoleta de los Sabios',
+    'El Bosque USC',
+    'El Lago',
+    'La Fuente',
+  ];
+
+  static const zonasDeporteJuegos = [
+    'Canchas',
+    'Sala de juegos (Bloque 5)',
+    'Sala de juegos (Bloque 8)',
+    'Plazoleta de la Arena USC',
+  ];
+
+  static const laboratorioMatematicas = 'Bloque 6 - Laboratorio de Matemáticas';
+
+  static const accesosCampus = [
+    'Entrada del Bloque 1',
+    'Medialuna del Bloque 2',
+    'Entrada Peatonal Principal (Calle 5)',
+    'Entrada Vehicular (Carrera 62)',
+    'Parqueadero de estudiantes',
+    'Edificio Nuevo - Posgrados',
+    laboratorioMatematicas,
+  ];
+
+  // Puntos fijos del campus y nombres usados en publicaciones anteriores.
   static const List<String> puntosCampus = [
+    ...bloquesCampus,
+    ...zonasComidaDescanso,
+    ...zonasDeporteJuegos,
+    ...accesosCampus,
     'Bloque 1 - Administración Central',
     'Bloque 2 - Biblioteca y Aulas Generales',
     'Bloque 3 - Facultad de Ingeniería',
     'Bloque 4 - Facultad de Salud y Laboratorios',
     'Bloque 5 - Auditorio Aula Máxima',
-    'Bloque 6 - Cafetería Central / Plazoleta',
     'Bloque 7 - Ciencias Básicas',
     'Polideportivo / Canchas Sintéticas',
-    'Edificio Nuevo - Posgrados',
-    'Entrada Peatonal Principal (Calle 5)',
-    'Entrada Vehicular (Carrera 62)',
+    'Bulevar USC (restaurantes)',
   ];
 
   // Programas académicos USC (RF01)

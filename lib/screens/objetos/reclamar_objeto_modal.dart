@@ -1,14 +1,15 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../../config/app_theme.dart';
 import '../../models/objeto_model.dart';
 import '../../providers/objeto_provider.dart';
 import '../../services/auth_service.dart';
-import '../chat/chat_room_screen.dart';
 
-/// Modal para Reclamación de Objeto ("Yo tengo el objeto" / "Es mío") (RF11, RF12)
+/// Modal para Reclamación de Objeto ("Lo encontré" / "Es mío") (RF11, RF12)
 /// - Adjuntar obligatoriamente una foto como prueba para continuar
 /// - Bloquea inmediatamente a otros usuarios cambiando a estado "Pendiente"
 /// - Crea chat 1-a-1 e inserta mensaje automático con la foto al dueño
@@ -45,16 +46,14 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
 
   Future<void> _tomarFoto(ImageSource source) async {
     try {
-      final picked = await _picker.pickImage(
-        source: source,
-        imageQuality: 80,
-      );
-      if (picked != null) {
+      final picked = await _picker.pickImage(source: source, imageQuality: 80);
+      if (picked != null && mounted) {
         setState(() {
           _fotoPrueba = File(picked.path);
         });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error seleccionando imagen: $e'),
@@ -69,9 +68,20 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
     if (_fotoPrueba == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Debes adjuntar obligatoriamente una foto como prueba (RF11).'),
+          content: Text(
+            'Adjunta una foto para que puedan revisar tu solicitud.',
+          ),
           backgroundColor: AppTheme.errorColor,
         ),
+      );
+      return;
+    }
+
+    if (widget.objeto.esDemostracion) {
+      final mensajes = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      mensajes.showSnackBar(
+        const SnackBar(content: Text('Vista previa completada.')),
       );
       return;
     }
@@ -91,9 +101,8 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
 
     try {
       final objetoService = ref.read(objetoServiceProvider);
-      final nombreReclamante = user.displayName ??
-          user.email?.split('@').first ??
-          'Estudiante USC';
+      final nombreReclamante =
+          user.displayName ?? user.email?.split('@').first ?? 'Estudiante USC';
 
       await objetoService.reclamarObjeto(
         idObjeto: widget.objeto.id,
@@ -109,25 +118,9 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            '¡Reclamación enviada! El objeto quedó en revisión y se abrió el chat.',
+            'Solicitud enviada. El dueño revisará la foto y el mensaje.',
           ),
           backgroundColor: AppTheme.successColor,
-        ),
-      );
-
-      // Redirigir a la sala de chat vinculada
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatRoomScreen(
-            idReferencia: widget.objeto.id,
-            tipoReferencia: 'objeto',
-            tituloReferencia: widget.objeto.titulo,
-            otroUsuarioId: widget.objeto.idDueno,
-            otroUsuarioNombre: widget.objeto.nombreDueno.isNotEmpty
-                ? widget.objeto.nombreDueno
-                : 'Reportante',
-          ),
         ),
       );
     } catch (e) {
@@ -144,12 +137,12 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final esPerdido = widget.objeto.esPerdido;
-    final accionTitulo = esPerdido ? 'Yo tengo el objeto' : 'Reclamar: Es mío';
+    final accionTitulo = esPerdido ? 'Lo encontré' : 'Es mío';
 
     return Container(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottomInset),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -225,11 +218,15 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.camera_alt_outlined, color: AppTheme.primaryColor, size: 22),
+                  Icon(
+                    Icons.camera_alt_outlined,
+                    color: AppTheme.primaryColor,
+                    size: 22,
+                  ),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Por seguridad de la comunidad USC, debes adjuntar una foto del objeto para validar tu identidad o tenencia.',
+                      'Enviaremos tu solicitud con la foto y el mensaje a quien publicó el reporte para que pueda comprobar que se trata del mismo objeto.',
                       style: TextStyle(
                         fontSize: 12.5,
                         color: Color(0xFF334155),
@@ -241,9 +238,37 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
             ),
             const SizedBox(height: 16),
 
+            // Mensaje opcional
+            const Text(
+              'Mensaje (opcional)',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                color: Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _mensajeController,
+              minLines: 3,
+              maxLines: 5,
+              decoration: InputDecoration(
+                hintText: esPerdido
+                    ? 'Ej. Lo encontré cerca del salón 1405, bloque 1, piso 4.'
+                    : 'Ej. Mi cartera tiene un cierre dorado y la perdí cerca del salón 1405.',
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
             // Selector / Vista previa de la foto de prueba
             const Text(
-              'Foto de Prueba (Obligatoria) *',
+              'Foto del objeto (obligatoria)',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
@@ -271,7 +296,11 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                       backgroundColor: Colors.black54,
                       radius: 18,
                       child: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                         onPressed: () => setState(() => _fotoPrueba = null),
                       ),
                     ),
@@ -284,7 +313,10 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _tomarFoto(ImageSource.camera),
-                      icon: const Icon(Icons.camera_alt, color: AppTheme.primaryColor),
+                      icon: const Icon(
+                        Icons.camera_alt,
+                        color: AppTheme.primaryColor,
+                      ),
                       label: const Text('Cámara'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -298,7 +330,10 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _tomarFoto(ImageSource.gallery),
-                      icon: const Icon(Icons.photo_library, color: AppTheme.primaryColor),
+                      icon: const Icon(
+                        Icons.photo_library,
+                        color: AppTheme.primaryColor,
+                      ),
                       label: const Text('Galería'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -311,31 +346,6 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                 ],
               ),
             const SizedBox(height: 16),
-
-            // Mensaje opcional
-            const Text(
-              'Mensaje para el dueño / reportante (Opcional)',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: Color(0xFF1E293B),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _mensajeController,
-              maxLines: 2,
-              decoration: InputDecoration(
-                hintText: 'Ej: Lo tengo guardado en mi casillero del Bloque 3...',
-                filled: true,
-                fillColor: const Color(0xFFF8FAFC),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
 
             // Botón de Enviar
             SizedBox(
@@ -359,7 +369,7 @@ class _ReclamarObjetoModalState extends ConsumerState<ReclamarObjetoModal> {
                         ),
                       )
                     : const Text(
-                        'Confirmar y Enviar Reclamación',
+                        'Enviar solicitud',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,

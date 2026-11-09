@@ -179,6 +179,72 @@ final favoresFeedProvider =
       return FavoresFeedNotifier(favorService);
     });
 
+final favoresCalificadosProvider = StreamProvider.autoDispose
+    .family<Set<String>, String>((ref, uid) {
+      return FirebaseFirestore.instance
+          .collection('calificaciones')
+          .where('idAutor', isEqualTo: uid)
+          .snapshots()
+          .map(
+            (snapshot) => {
+              for (final doc in snapshot.docs)
+                if (doc.data()['idFavor'] case final String id) id,
+            },
+          );
+    });
+
+final _favoresParticipadosProvider = StreamProvider.autoDispose
+    .family<List<FavorModel>, String>((ref, uid) {
+      return FirebaseFirestore.instance
+          .collection('favores')
+          .where(
+            Filter.or(
+              Filter('idAutor', isEqualTo: uid),
+              Filter('idAyudante', isEqualTo: uid),
+            ),
+          )
+          .snapshots()
+          .map(
+            (snapshot) => [
+              for (final doc in snapshot.docs)
+                FavorModel.fromMap(doc.data(), doc.id),
+            ],
+          );
+    });
+
+final seguimientoFavorProvider = Provider.autoDispose
+    .family<FavorModel?, String>((ref, uid) {
+      final favores = ref.watch(_favoresParticipadosProvider(uid)).valueOrNull;
+      final calificados = ref
+          .watch(favoresCalificadosProvider(uid))
+          .valueOrNull;
+      if (favores == null) return null;
+
+      int prioridad(FavorModel favor) => switch (favor.estado) {
+        'Aceptado' => 3,
+        'Publicado' => 2,
+        'Entregado'
+            when favor.puedeCalificar(uid) &&
+                calificados != null &&
+                !calificados.contains(favor.id) =>
+          1,
+        _ => 0,
+      };
+
+      FavorModel? seguimiento;
+      for (final favor in favores) {
+        final actual = seguimiento;
+        if (prioridad(favor) == 0) continue;
+        if (actual == null ||
+            prioridad(favor) > prioridad(actual) ||
+            (prioridad(favor) == prioridad(actual) &&
+                favor.fechaCreacion.isAfter(actual.fechaCreacion))) {
+          seguimiento = favor;
+        }
+      }
+      return seguimiento;
+    });
+
 /// StreamProvider para ver los detalles en tiempo real de un favor en particular
 final favorDetailStreamProvider = StreamProvider.family<FavorModel?, String>((
   ref,

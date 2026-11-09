@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:favores_usc/config/app_constants.dart';
 import 'package:favores_usc/services/favor_service.dart';
+import 'package:favores_usc/services/perfil_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -93,43 +94,31 @@ void main() {
     );
     sesion = 'ayudante';
     await servicio.aceptarFavor(favorId: 'f1', idAyudante: sesion);
-    expect((await db.doc('chats/favor_f1').get()).get('participantes'), [
+    final salaId = (await db.doc('favores/f1').get()).get('idChat') as String;
+    expect((await db.doc('chats/$salaId').get()).get('participantes'), [
       'autor',
       'ayudante',
     ]);
   });
 
-  test('no modifica agregados incompletos o fraccionarios', () async {
-    await db.doc('usuarios/ayudante').update({'cantidadCalificaciones': 1});
-    await expectLater(calificar(), throwsException);
-    await db.doc('usuarios/ayudante').update({
-      'cantidadCalificaciones': 1.5,
-      'sumaEstrellas': 5,
-    });
-    await expectLater(calificar(), throwsException);
-    expect((await db.collection('calificaciones').get()).docs, isEmpty);
+  test('guarda la calificación sin modificar el perfil ni el favor', () async {
+    final perfil = db.doc('usuarios/ayudante');
+    final favor = db.doc('favores/f1');
+    final perfilAntes = (await perfil.get()).data();
+    final favorAntes = (await favor.get()).data();
+    await calificar();
+    final nota = (await db.doc('calificaciones/f1_autor').get()).data()!;
+    expect(nota['estrellas'], 4);
+    expect(nota['idDestinatario'], 'ayudante');
+    expect((await perfil.get()).data(), perfilAntes);
+    expect((await favor.get()).data(), favorAntes);
   });
-
-  test(
-    'guarda una calificación, ambos promedios y contadores exactos',
-    () async {
-      await calificar();
-      final usuario = (await db.doc('usuarios/ayudante').get()).data()!;
-      expect(usuario['sumaEstrellas'], 4);
-      expect(usuario['cantidadCalificaciones'], 1);
-      expect(usuario['promedio'], 4.0);
-      expect(usuario['promedioCalificacion'], 4.0);
-      expect((await db.doc('favores/f1').get()).data()!['calificadoPor'], [
-        'autor',
-      ]);
-    },
-  );
 
   test('bloquea una segunda calificación sin alterar el promedio', () async {
     await calificar();
     await expectLater(calificar(estrellas: 1), throwsException);
     expect((await db.collection('calificaciones').get()).docs, hasLength(1));
-    expect((await db.doc('usuarios/ayudante').get()).get('promedio'), 4.0);
+    expect((await db.doc('calificaciones/f1_autor').get()).get('estrellas'), 4);
   });
 
   test(
@@ -140,10 +129,12 @@ void main() {
       await calificar(favor: 'f2', estrellas: 2);
       await prepararFavor(id: 'f3');
       await calificar(favor: 'f3', estrellas: 3);
-      final usuario = (await db.doc('usuarios/ayudante').get()).data()!;
-      expect(usuario['sumaEstrellas'], 10);
-      expect(usuario['cantidadCalificaciones'], 3);
-      expect(usuario['promedio'], closeTo(10 / 3, 0.000001));
+      final perfil = await PerfilService(firestore: db)
+          .observarPerfil('ayudante')
+          .firstWhere(
+            (datos) => datos?['promedioCalificacion'] != 0.0 && datos != null,
+          );
+      expect(perfil?['promedioCalificacion'], closeTo(10 / 3, 0.000001));
     },
   );
 
@@ -174,8 +165,8 @@ void main() {
     await calificar(destinatario: 'autor');
     await expectLater(calificar(destinatario: 'autor'), throwsException);
     expect(
-      (await db.doc('usuarios/autor').get()).get('cantidadCalificaciones'),
-      1,
+      (await db.doc('calificaciones/f1_ayudante').get()).get('idDestinatario'),
+      'autor',
     );
   });
 
@@ -197,7 +188,7 @@ void main() {
   );
 
   test(
-    'no reinicia el promedio antiguo cuando faltan sus contadores',
+    'las calificaciones previas cuentan aunque el perfil no tenga contadores',
     () async {
       await db.doc('calificaciones/antigua').set({
         'idFavor': 'otro',
@@ -206,16 +197,16 @@ void main() {
         'estrellas': 2,
       });
       await db.doc('usuarios/ayudante').update({'promedio': 2.0});
-      await expectLater(calificar(), throwsException);
+      await calificar();
       expect((await db.doc('usuarios/ayudante').get()).get('promedio'), 2.0);
-      expect((await db.collection('calificaciones').get()).docs, hasLength(1));
+      expect((await db.collection('calificaciones').get()).docs, hasLength(2));
     },
   );
 
-  test('las claves de calificación no colisionan con guiones bajos', () {
+  test('la clave de la calificación coincide con las reglas publicadas', () {
     expect(
-      FavorService.calificacionId('a_b', 'c'),
-      isNot(FavorService.calificacionId('a', 'b_c')),
+      FavorService.calificacionId('ejemplo_favor', 'abc'),
+      'ejemplo_favor_abc',
     );
   });
 
@@ -224,7 +215,8 @@ void main() {
     sesion = 'ayudante';
     await servicio.aceptarFavor(favorId: 'f1', idAyudante: sesion);
     expect((await db.doc('favores/f1').get()).get('estado'), 'Aceptado');
-    final chat = (await db.doc('chats/favor_f1').get()).data()!;
+    final salaId = (await db.doc('favores/f1').get()).get('idChat') as String;
+    final chat = (await db.doc('chats/$salaId').get()).data()!;
     expect(chat['participantes'], ['autor', 'ayudante']);
     expect(chat['soloLectura'], false);
     await expectLater(
@@ -247,12 +239,57 @@ void main() {
     expect((await db.collection('chats').get()).docs, isEmpty);
   });
 
+  test('solo el ayudante cancela y el favor admite otra aceptación', () async {
+    await prepararFavor(estado: 'Publicado');
+    sesion = 'ayudante';
+    await servicio.aceptarFavor(favorId: 'f1', idAyudante: sesion);
+    final favor = db.doc('favores/f1');
+    final salaId = (await favor.get()).get('idChat') as String;
+    await db.doc('chats/$salaId/mensajes/m1').set({'texto': 'Hola'});
+
+    sesion = 'autor';
+    await expectLater(
+      servicio.cancelarAceptacion(favorId: 'f1', idAyudante: sesion),
+      throwsException,
+    );
+    sesion = 'ayudante';
+    await servicio.cancelarAceptacion(favorId: 'f1', idAyudante: sesion);
+    final publicado = (await favor.get()).data()!;
+    expect(publicado['estado'], 'Publicado');
+    expect(publicado['idAyudante'], isNull);
+    expect(publicado, isNot(contains('idChat')));
+    expect((await db.doc('chats/$salaId').get()).get('soloLectura'), true);
+    expect((await db.doc('chats/$salaId/mensajes/m1').get()).exists, true);
+
+    await servicio.aceptarFavor(favorId: 'f1', idAyudante: sesion);
+    final salaNueva = (await favor.get()).get('idChat') as String;
+    expect(salaNueva, isNot(salaId));
+    expect((await db.doc('chats/$salaNueva').get()).get('soloLectura'), false);
+  });
+
+  test('borrar elimina el favor publicado solo para su autor', () async {
+    await expectLater(
+      servicio.eliminarFavor('f1', idAutor: sesion),
+      throwsException,
+    );
+    await prepararFavor(estado: 'Publicado');
+    sesion = 'ayudante';
+    await expectLater(
+      servicio.eliminarFavor('f1', idAutor: sesion),
+      throwsException,
+    );
+    sesion = 'autor';
+    await servicio.eliminarFavor('f1', idAutor: sesion);
+    expect((await db.doc('favores/f1').get()).exists, false);
+  });
+
   test(
     'solo el ayudante confirma pago, cierra chat e incrementa una vez',
     () async {
       await prepararFavor(estado: 'Publicado');
       sesion = 'ayudante';
       await servicio.aceptarFavor(favorId: 'f1', idAyudante: sesion);
+      final salaId = (await db.doc('favores/f1').get()).get('idChat') as String;
       sesion = 'autor';
       await expectLater(
         servicio.confirmarPagoYEntregar(favorId: 'f1', idAyudante: sesion),
@@ -260,7 +297,7 @@ void main() {
       );
       sesion = 'ayudante';
       await servicio.confirmarPagoYEntregar(favorId: 'f1', idAyudante: sesion);
-      expect((await db.doc('chats/favor_f1').get()).get('soloLectura'), true);
+      expect((await db.doc('chats/$salaId').get()).get('soloLectura'), true);
       expect(
         (await db.doc('favores/f1').get()).get('calificacionHabilitada'),
         true,

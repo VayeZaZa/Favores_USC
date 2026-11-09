@@ -1,14 +1,27 @@
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
 import '../models/objeto_model.dart';
 import 'chat_service.dart';
 import 'cloudinary_service.dart';
 
 /// Servicio de Firestore para la gestión del ciclo de vida de Objetos (RF07, RF10, RF11, RF12, RF13)
 class ObjetoService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final CloudinaryService _cloudinaryService = CloudinaryService();
-  final ChatService _chatService = ChatService();
+  ObjetoService({
+    FirebaseFirestore? firestore,
+    CloudinaryService? cloudinaryService,
+    String? Function()? usuarioActualId,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _cloudinaryService = cloudinaryService ?? CloudinaryService(),
+       _usuarioActualId =
+           usuarioActualId ?? (() => FirebaseAuth.instance.currentUser?.uid);
+
+  final FirebaseFirestore _firestore;
+  final CloudinaryService _cloudinaryService;
+  final String? Function() _usuarioActualId;
+  late final ChatService _chatService = ChatService();
 
   CollectionReference<Map<String, dynamic>> get _objetosCol =>
       _firestore.collection('objetos');
@@ -26,15 +39,17 @@ class ObjetoService {
     required String tipo, // 'perdido' o 'encontrado'
     required String etiquetaColor,
     required String lugarCampus,
+    String dondeQuedo = '',
     File? imagenArchivo,
   }) async {
+    if (idDueno.isEmpty || _usuarioActualId() != idDueno) {
+      throw Exception('Debes iniciar sesión para publicar un reporte.');
+    }
     final tipoNormalizado = tipo.toLowerCase().trim();
 
     // Validación RF10: Obligatoriedad de foto para objetos "encontrados"
     if (tipoNormalizado == 'encontrado' && imagenArchivo == null) {
-      throw ArgumentError(
-        'La foto es obligatoria para reportar un objeto encontrado (RF10).',
-      );
+      throw ArgumentError('Agrega una foto del objeto que encontraste.');
     }
 
     String urlFoto = '';
@@ -43,13 +58,12 @@ class ObjetoService {
         imagenArchivo,
         folder: 'objetos_fotos',
       );
-      if (subida != null) {
-        urlFoto = subida;
-      } else if (tipoNormalizado == 'encontrado') {
+      if (subida == null || subida.isEmpty) {
         throw Exception(
-          'No se pudo subir la foto obligatoria a Cloudinary. Revisa tu conexión.',
+          'No se pudo subir la foto. Intenta de nuevo o elige otra imagen.',
         );
       }
+      urlFoto = subida;
     }
 
     final docRef = _objetosCol.doc();
@@ -62,6 +76,7 @@ class ObjetoService {
       tipo: tipoNormalizado,
       etiquetaColor: etiquetaColor,
       lugarCampus: lugarCampus,
+      dondeQuedo: dondeQuedo,
       urlFoto: urlFoto,
       estadoActual: EstadoObjeto.publicado.valor,
       fechaReporte: DateTime.now(),
@@ -73,22 +88,32 @@ class ObjetoService {
   }
 
   /// 2. Stream en tiempo real de objetos filtrados por tipo (RF10)
-  Stream<List<ObjetoModel>> obtenerObjetosStream({String? filtroTipo}) {
-    Query<Map<String, dynamic>> query = _objetosCol;
-
-    if (filtroTipo != null &&
-        filtroTipo.isNotEmpty &&
-        filtroTipo.toLowerCase() != 'todos') {
-      query = query.where('tipo', isEqualTo: filtroTipo.toLowerCase().trim());
-    }
-
-    return query
+  Stream<List<ObjetoModel>> obtenerObjetosStream() {
+    return _objetosCol
         .orderBy('fechaReporte', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => ObjetoModel.fromMap(doc.data(), doc.id))
-          .toList();
+          return snapshot.docs
+              .map((doc) => ObjetoModel.fromMap(doc.data(), doc.id))
+              .toList();
+        });
+  }
+
+  Future<void> eliminarObjeto(String idObjeto) async {
+    final uid = _usuarioActualId();
+    if (uid == null || uid.isEmpty) {
+      throw Exception('Debes iniciar sesión para borrar un reporte.');
+    }
+    final documento = _objetosCol.doc(idObjeto);
+    await _firestore.runTransaction((tx) async {
+      final snapshot = await tx.get(documento);
+      final datos = snapshot.data();
+      if (datos == null) return;
+      final objeto = ObjetoModel.fromMap(datos, snapshot.id);
+      if (!objeto.puedeEliminar(uid)) {
+        throw Exception('Solo puedes borrar tus reportes publicados.');
+      }
+      tx.delete(documento);
     });
   }
 
@@ -119,7 +144,7 @@ class ObjetoService {
 
     if (urlPrueba == null || urlPrueba.isEmpty) {
       throw Exception(
-        'Es obligatorio adjuntar una foto de prueba válida para continuar (RF11).',
+        'No se pudo adjuntar la foto de prueba. Intenta de nuevo.',
       );
     }
 
@@ -207,7 +232,7 @@ class ObjetoService {
     // Validación estricta de la máquina de estados
     if (!objeto.validarCambioEstado(nuevoEstadoStr, esRechazo: esRechazo)) {
       throw StateError(
-        'Transición no permitida: de "${objeto.estadoActual}" a "$nuevoEstadoStr". (RF13)',
+        'No se puede cambiar el reporte de "${objeto.estadoActual}" a "$nuevoEstadoStr".',
       );
     }
 

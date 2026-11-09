@@ -9,6 +9,7 @@ import '../../utils/favor_load_failure.dart';
 import 'widgets/favor_load_error.dart';
 import 'crear_favor_screen.dart';
 import 'favor_detail_screen.dart';
+import '../widgets/confirmar_borrado.dart';
 
 /// Actividad del módulo de Favores. No sustituye el perfil de usuario (RF15).
 class MiActividadFavoresScreen extends ConsumerStatefulWidget {
@@ -131,6 +132,34 @@ class _MiActividadFavoresState extends ConsumerState<MiActividadFavoresScreen> {
           SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
         );
       }
+    } finally {
+      if (mounted) setState(() => _accionId = null);
+    }
+  }
+
+  Future<void> _eliminar(FavorModel favor) async {
+    if (_accionId != null) return;
+    final confirmado = await confirmarBorradoPublicacion(
+      context,
+      tipo: 'favor',
+      titulo: favor.titulo,
+    );
+    if (!confirmado || !mounted || _accionId != null) return;
+    setState(() => _accionId = favor.id);
+    try {
+      await ref
+          .read(favorServiceProvider)
+          .eliminarFavor(favor.id, idAutor: widget.usuarioId);
+      if (!mounted) return;
+      ref.invalidate(favoresFeedProvider);
+      await _cargar(reiniciar: true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _accionId = null);
     }
@@ -282,6 +311,17 @@ class _MiActividadFavoresState extends ConsumerState<MiActividadFavoresScreen> {
                         ? () => _gestionar(favor, retirar: true)
                         : null,
                     child: const Text('Retirar'),
+                  ),
+                if (favor.puedeEliminar(widget.usuarioId))
+                  TextButton.icon(
+                    onPressed: _accionId == null
+                        ? () => _eliminar(favor)
+                        : null,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('Borrar'),
                   ),
               ],
             ),

@@ -1,11 +1,14 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../config/app_theme.dart';
 import '../../models/objeto_model.dart';
 import '../../providers/objeto_provider.dart';
 import '../../services/auth_service.dart';
 import '../chat/chat_room_screen.dart';
+import '../widgets/confirmar_borrado.dart';
+import 'objetos_demostracion.dart';
 import 'reclamar_objeto_modal.dart';
 import 'reportar_objeto_screen.dart';
 
@@ -22,7 +25,83 @@ class ArticulosScreen extends ConsumerStatefulWidget {
 }
 
 class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
-  String _tabActiva = 'perdido'; // 'perdido' | 'encontrado'
+  String _tabActiva = 'perdido'; // 'perdido' | 'encontrado' | 'todos'
+  String? _borrandoId;
+
+  Future<void> _eliminarReporte(ObjetoModel objeto) async {
+    if (_borrandoId != null) return;
+    final confirmado = await confirmarBorradoPublicacion(
+      context,
+      tipo: 'reporte',
+      titulo: objeto.titulo,
+    );
+    if (!confirmado || !mounted || _borrandoId != null) return;
+    setState(() => _borrandoId = objeto.id);
+    try {
+      await ref.read(objetoServiceProvider).eliminarObjeto(objeto.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Reporte borrado.')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _borrandoId = null);
+    }
+  }
+
+  Widget _listaObjetos(List<ObjetoModel> objetos, String miUid) {
+    final objetosConMuestras = [
+      ...crearObjetosDemostracion(),
+      ...objetos.where(
+        (objeto) =>
+            !(objeto.titulo.trim().toLowerCase() == 'llaves con llavero usc' &&
+                objeto.nombreDueno.trim().toLowerCase() == 'valeria martínez'),
+      ),
+    ];
+    final objetosFiltrados = _tabActiva == 'todos'
+        ? objetosConMuestras
+        : objetosConMuestras
+              .where((o) => o.tipo.toLowerCase() == _tabActiva)
+              .toList();
+
+    if (objetosFiltrados.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _tabActiva == 'perdido'
+                  ? Icons.search_off_rounded
+                  : Icons.inventory_2_outlined,
+              size: 64,
+              color: Colors.grey.shade400,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _tabActiva == 'perdido'
+                  ? 'No hay objetos perdidos reportados.'
+                  : 'No hay objetos encontrados reportados.',
+              style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      key: ValueKey(_tabActiva),
+      primary: false,
+      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 84),
+      itemCount: objetosFiltrados.length,
+      itemBuilder: (context, index) =>
+          _buildObjetoCard(objetosFiltrados[index], miUid),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +117,11 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
         centerTitle: true,
         leading: Navigator.canPop(context)
             ? IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF1E293B), size: 20),
+                icon: const Icon(
+                  Icons.arrow_back_ios_new,
+                  color: Color(0xFF1E293B),
+                  size: 20,
+                ),
                 onPressed: () => Navigator.pop(context),
               )
             : null,
@@ -54,9 +137,7 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
           IconButton(
             icon: const Icon(Icons.tune_rounded, color: Color(0xFF1E293B)),
             onPressed: () {
-              // Menú o selector de filtro adicional
-              ref.read(filtroObjetosTipoProvider.notifier).state =
-                  _tabActiva == 'todos' ? 'todos' : _tabActiva;
+              setState(() => _tabActiva = 'todos');
             },
           ),
         ],
@@ -86,7 +167,6 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
                       esActivo: _tabActiva == 'perdido',
                       onTap: () {
                         setState(() => _tabActiva = 'perdido');
-                        ref.read(filtroObjetosTipoProvider.notifier).state = 'perdido';
                       },
                     ),
                   ),
@@ -99,7 +179,6 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
                       esActivo: _tabActiva == 'encontrado',
                       onTap: () {
                         setState(() => _tabActiva = 'encontrado');
-                        ref.read(filtroObjetosTipoProvider.notifier).state = 'encontrado';
                       },
                     ),
                   ),
@@ -125,9 +204,7 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
                 ),
                 TextButton(
                   onPressed: () {
-                    // Mostrar todos
                     setState(() => _tabActiva = 'todos');
-                    ref.read(filtroObjetosTipoProvider.notifier).state = 'todos';
                   },
                   child: const Text(
                     'Ver todo',
@@ -144,53 +221,17 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
           const SizedBox(height: 6),
 
           // 3. Lista de Tarjetas de Objetos (image12.png)
+          if (objetosAsync.hasError)
+            Center(
+              child: TextButton(
+                onPressed: () => ref.invalidate(objetosStreamProvider),
+                child: const Text('Reintentar cargar reportes'),
+              ),
+            )
+          else if (objetosAsync.isLoading)
+            const LinearProgressIndicator(),
           Expanded(
-            child: objetosAsync.when(
-              data: (objetos) {
-                // Filtrar según pestaña local si aplica
-                final objetosFiltrados = _tabActiva == 'todos'
-                    ? objetos
-                    : objetos.where((o) => o.tipo.toLowerCase() == _tabActiva).toList();
-
-                if (objetosFiltrados.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          _tabActiva == 'perdido'
-                              ? Icons.search_off_rounded
-                              : Icons.inventory_2_outlined,
-                          size: 64,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _tabActiva == 'perdido'
-                              ? 'No hay objetos perdidos reportados.'
-                              : 'No hay objetos encontrados reportados.',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 84),
-                  itemCount: objetosFiltrados.length,
-                  itemBuilder: (context, index) {
-                    final objeto = objetosFiltrados[index];
-                    return _buildObjetoCard(objeto, miUid);
-                  },
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error cargando artículos: $e')),
-            ),
+            child: _listaObjetos(objetosAsync.valueOrNull ?? const [], miUid),
           ),
         ],
       ),
@@ -201,10 +242,16 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: ElevatedButton.icon(
           onPressed: () {
-            Navigator.push(
+            Navigator.push<bool>(
               context,
-              MaterialPageRoute(builder: (_) => const ReportarObjetoScreen()),
-            );
+              MaterialPageRoute<bool>(
+                builder: (_) => const ReportarObjetoScreen(),
+              ),
+            ).then((publicado) {
+              if (publicado == true && mounted) {
+                setState(() => _tabActiva = 'todos');
+              }
+            });
           },
           icon: const Icon(Icons.add, color: Colors.white, size: 22),
           label: const Text(
@@ -266,7 +313,9 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: esActivo ? FontWeight.bold : FontWeight.w500,
-                color: esActivo ? const Color(0xFF1E293B) : const Color(0xFF64748B),
+                color: esActivo
+                    ? const Color(0xFF1E293B)
+                    : const Color(0xFF64748B),
               ),
             ),
           ],
@@ -275,259 +324,315 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
     );
   }
 
-  Widget _buildObjetoCard(ObjetoModel objeto, String miUid) {
-    final esPerdido = objeto.esPerdido;
-    final esDueno = objeto.idDueno == miUid;
-    final badgeBg = esPerdido ? const Color(0xFFFFE4E6) : const Color(0xFFD1FAE5);
-    final badgeText = esPerdido ? const Color(0xFFE11D48) : const Color(0xFF059669);
+  String? _autorVisible(ObjetoModel objeto) {
+    final nombre = objeto.nombreDueno.trim();
+    const nombresGenericos = {'', 'estudiante', 'estudiante usc'};
+    return nombresGenericos.contains(nombre.toLowerCase()) ? null : nombre;
+  }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1. Miniatura de imagen
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
-              width: 88,
-              height: 88,
-              child: objeto.urlFoto.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: objeto.urlFoto,
-                      fit: BoxFit.cover,
-                      placeholder: (ctx, url) => Container(
-                        color: Colors.grey.shade100,
-                        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
-                      errorWidget: (ctx, url, error) => _buildPlaceholderFoto(objeto),
-                    )
-                  : _buildPlaceholderFoto(objeto),
-            ),
-          ),
-          const SizedBox(width: 14),
+  String? _fotoIlustrativa(ObjetoModel objeto) {
+    final titulo = objeto.titulo.toLowerCase();
+    if (titulo.contains('llave')) {
+      return 'assets/images/objetos_llaves_demo.png';
+    }
+    if (titulo.contains('cartera rosada')) {
+      return 'assets/images/objetos_cartera_demo.png';
+    }
+    return null;
+  }
 
-          // 2. Información del objeto
-          Expanded(
+  Widget _fotoObjeto(ObjetoModel objeto, {BoxFit fit = BoxFit.cover}) {
+    final ilustracion = _fotoIlustrativa(objeto);
+    final alternativa = ilustracion == null
+        ? _buildPlaceholderFoto(objeto)
+        : Image.asset(
+            ilustracion,
+            fit: fit,
+            errorBuilder: (_, _, _) => _buildPlaceholderFoto(objeto),
+          );
+    final url = objeto.urlFoto.trim();
+    return url.isEmpty
+        ? alternativa
+        : CachedNetworkImage(
+            imageUrl: url,
+            fit: fit,
+            placeholder: (_, _) => _buildPlaceholderFoto(objeto),
+            errorWidget: (_, _, _) => alternativa,
+          );
+  }
+
+  Future<void> _mostrarDetalle(ObjetoModel objeto, String miUid) async {
+    final autor = _autorVisible(objeto);
+    final esDueno = !objeto.esDemostracion && objeto.idDueno == miUid;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (detalleContext) {
+        final tema = Theme.of(detalleContext);
+        return FractionallySizedBox(
+          heightFactor: .90,
+          child: SafeArea(
+            top: false,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Badge Tipo (PERDIDO / ENCONTRADO)
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: badgeBg,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        esPerdido ? 'PERDIDO' : 'ENCONTRADO',
-                        style: TextStyle(
-                          color: badgeText,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: AspectRatio(
+                          aspectRatio: 4 / 3,
+                          child: _fotoObjeto(objeto, fit: BoxFit.contain),
                         ),
                       ),
-                    ),
-                    const Spacer(),
-                    // Badge de estado si no está en 'Publicado'
-                    if (!objeto.esPublicado)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: objeto.esEntregado
-                              ? const Color(0xFFE2E8F0)
-                              : const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(8),
+                      if (!objeto.esDemostracion &&
+                          objeto.urlFoto.trim().isEmpty &&
+                          _fotoIlustrativa(objeto) != null)
+                        const Text('Imagen ilustrativa'),
+                      const SizedBox(height: 16),
+                      Text(
+                        objeto.esPerdido ? 'Perdido' : 'Encontrado',
+                        style: tema.textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(objeto.titulo, style: tema.textTheme.headlineSmall),
+                      if (autor != null) Text('Por $autor'),
+                      const SizedBox(height: 12),
+                      Text(
+                        objeto.lugarCampus,
+                        style: tema.textTheme.titleSmall,
+                      ),
+                      if (objeto.descripcion.trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(objeto.descripcion),
+                      ],
+                      if (objeto.esEncontrado && objeto.dondeQuedo.isNotEmpty)
+                        Text(objeto.dondeQuedo),
+                      if (!objeto.esPublicado)
+                        Text('Estado: ${objeto.estadoActual}'),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (esDueno)
+                        const Text('Tu reporte', textAlign: TextAlign.center),
+                      if (objeto.puedeEliminar(miUid) && esDueno)
+                        TextButton.icon(
+                          onPressed: _borrandoId == null
+                              ? () {
+                                  Navigator.pop(detalleContext);
+                                  _eliminarReporte(objeto);
+                                }
+                              : null,
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: const Text('Borrar reporte'),
                         ),
-                        child: Text(
-                          objeto.estadoActual,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: objeto.esEntregado
-                                ? const Color(0xFF475569)
-                                : const Color(0xFFD97706),
+                      if (!objeto.esDemostracion && !esDueno)
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.of(detalleContext).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ChatRoomScreen(
+                                  idReferencia: objeto.id,
+                                  tipoReferencia: 'objeto',
+                                  tituloReferencia: objeto.titulo,
+                                  otroUsuarioId: objeto.idDueno,
+                                  otroUsuarioNombre: autor ?? 'Reportante',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline_rounded),
+                          label: const Text('Chat'),
+                        ),
+                      if (objeto.esPublicado && !esDueno)
+                        ElevatedButton(
+                          onPressed: () => ReclamarObjetoModal.mostrar(
+                            detalleContext,
+                            objeto,
+                          ),
+                          child: Text(
+                            objeto.esPerdido ? 'Lo encontré' : 'Es mío',
                           ),
                         ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-
-                // Título
-                Text(
-                  objeto.titulo,
-                  style: const TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
+                    ],
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-
-                // Ubicación del Campus (Pin icon)
-                Row(
-                  children: [
-                    const Icon(Icons.location_on, size: 14, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        objeto.lugarCampus,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF64748B),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-
-                // Reportado por + Acciones (image12.png)
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 11,
-                      backgroundColor: const Color(0xFFE2E8F0),
-                      child: Text(
-                        objeto.nombreDueno.isNotEmpty
-                            ? objeto.nombreDueno.substring(0, 1).toUpperCase()
-                            : 'U',
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF475569),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Por ${objeto.nombreDueno.isNotEmpty ? objeto.nombreDueno : "Estudiante"}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF94A3B8),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+        );
+      },
+    );
+  }
 
-          // 3. Botones a la derecha: Chat y Acción ("Es mío" / "Yo tengo el objeto")
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              // Botón de Chat (RF07): Abre sala 1-a-1
-              InkWell(
-                onTap: () {
-                  if (esDueno) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Este objeto fue reportado por ti.'),
-                      ),
-                    );
-                    return;
-                  }
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChatRoomScreen(
-                        idReferencia: objeto.id,
-                        tipoReferencia: 'objeto',
-                        tituloReferencia: objeto.titulo,
-                        otroUsuarioId: objeto.idDueno,
-                        otroUsuarioNombre: objeto.nombreDueno.isNotEmpty
-                            ? objeto.nombreDueno
-                            : 'Reportante',
-                      ),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEEF2FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.chat_bubble_outline_rounded,
-                    color: AppTheme.primaryColor,
-                    size: 19,
-                  ),
-                ),
+  Widget _buildObjetoCard(ObjetoModel objeto, String miUid) {
+    final esPerdido = objeto.esPerdido;
+    final autor = _autorVisible(objeto);
+    final badgeBg = esPerdido
+        ? const Color(0xFFFFE4E6)
+        : const Color(0xFFD1FAE5);
+    final badgeText = esPerdido
+        ? const Color(0xFFE11D48)
+        : const Color(0xFF059669);
+
+    return InkWell(
+      onTap: () => _mostrarDetalle(objeto, miUid),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Miniatura de imagen
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                width: 88,
+                height: 88,
+                child: _fotoObjeto(objeto),
               ),
-              const SizedBox(height: 10),
+            ),
+            const SizedBox(width: 14),
 
-              // Botón de Reclamar ("Es mío" / "Yo tengo el objeto") (RF11, RF12)
-              if (objeto.esPublicado && !esDueno)
-                SizedBox(
-                  height: 32,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      ReclamarObjetoModal.mostrar(context, objeto);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryColor,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+            // 2. Información del objeto
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Badge Tipo (PERDIDO / ENCONTRADO)
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          esPerdido ? 'PERDIDO' : 'ENCONTRADO',
+                          style: TextStyle(
+                            color: badgeText,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                      const Spacer(),
+                      // Badge de estado si no está en 'Publicado'
+                      if (!objeto.esPublicado)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: objeto.esEntregado
+                                ? const Color(0xFFE2E8F0)
+                                : const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            objeto.estadoActual,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: objeto.esEntregado
+                                  ? const Color(0xFF475569)
+                                  : const Color(0xFFD97706),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Título
+                  Text(
+                    objeto.titulo,
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1E293B),
                     ),
-                    child: Text(
-                      esPerdido ? 'Lo encontré' : 'Es mío',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+
+                  // Ubicación del Campus (Pin icon)
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on,
+                        size: 14,
+                        color: Color(0xFF94A3B8),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          objeto.lugarCampus,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  if (objeto.esEncontrado && objeto.dondeQuedo.isNotEmpty) ...[
+                    Text(
+                      objeto.dondeQuedo,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        fontSize: 11,
+                        color: Color(0xFF475569),
                       ),
                     ),
-                  ),
-                )
-              else if (esDueno)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'Tu reporte',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF64748B),
+                    const SizedBox(height: 6),
+                  ],
+
+                  if (autor != null)
+                    Text(
+                      'Por $autor',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                  ),
-                ),
-            ],
-          ),
-        ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+
+            const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
       ),
     );
   }
@@ -558,7 +663,9 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
       color: colorFondo,
       child: Center(
         child: Icon(
-          objeto.esPerdido ? Icons.search_off_rounded : Icons.check_circle_outline_rounded,
+          objeto.esPerdido
+              ? Icons.search_off_rounded
+              : Icons.check_circle_outline_rounded,
           color: AppTheme.primaryColor,
           size: 32,
         ),

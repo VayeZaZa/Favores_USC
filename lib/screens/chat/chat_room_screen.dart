@@ -24,6 +24,7 @@ class ChatRoomScreen extends ConsumerStatefulWidget {
   final String tituloReferencia;
   final String otroUsuarioId;
   final String otroUsuarioNombre;
+  final String? salaId;
 
   const ChatRoomScreen({
     super.key,
@@ -32,6 +33,7 @@ class ChatRoomScreen extends ConsumerStatefulWidget {
     required this.tituloReferencia,
     required this.otroUsuarioId,
     required this.otroUsuarioNombre,
+    this.salaId,
   });
 
   @override
@@ -51,7 +53,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
-    _inicializarSala();
+    _chatId = widget.salaId;
+    _isLoadingChat = _chatId == null;
+    if (_isLoadingChat) _inicializarSala();
   }
 
   @override

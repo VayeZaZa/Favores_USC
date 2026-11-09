@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
+import 'config/app_constants.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,7 +55,7 @@ void main() async {
     'etiquetaColor': 'rojo',
     'titulo': 'Calculadora Casio fx-570',
     'descripcion': 'Dejada en una banca cerca a la cafetería',
-    'lugarCampus': 'Bloque 6 - Cafetería Central / Plazoleta',
+    'lugarCampus': AppConstants.laboratorioMatematicas,
     'urlFoto': '',
     'idDueno': 'ejemplo_usuario',
     'nombreDueno': 'Valeria Yance',

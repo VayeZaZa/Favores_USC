@@ -107,15 +107,13 @@ class ChatService {
 
     // Validación estricta de emisor (RF07): Solo los 2 participantes autorizados pueden escribir
     if (!chat.participantes.contains(idEmisor)) {
-      throw Exception(
-        'Acceso denegado: El usuario no pertenece a esta sala de chat privada (RF07).',
-      );
+      throw Exception('Solo los participantes pueden acceder a este chat.');
     }
 
     // Validación de modo Solo Lectura cuando el caso se cierra (RF07)
     if (chat.soloLectura) {
       throw Exception(
-        'Este caso ha sido cerrado. El chat se encuentra en modo solo lectura (RF07).',
+        'El caso se cerró y el chat está en modo de solo lectura.',
       );
     }
 

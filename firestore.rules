@@ -2,7 +2,7 @@ rules_version = '2';
 
 // Modelo actual de la app Flutter. Todos los accesos requieren una sesión.
 // usuarios/{uid}: perfil privado; uid/correo inmutables. No se asignan roles.
-// favores/{id}: autor, ayudante opcional y Publicado -> Aceptado -> Entregado.
+// favores/{id}: UID y datos visibles de los participantes, estado y sala asociada.
 // objetos/{id}: dueño, reclamante opcional y Publicado -> Pendiente -> Confirmado -> Entregado.
 // chats/{id}/mensajes/{id}: dos participantes inmutables, vinculados a un caso.
 // calificaciones/{favorId_uid}: una evaluación por participante tras la entrega.
@@ -84,14 +84,21 @@ service cloud.firestore {
     }
 
     function favorValido(d) {
-      return d.keys().hasOnly(['id', 'idAutor', 'idAyudante', 'nombreAutor', 'tipo',
+      return d.keys().hasOnly(['id', 'idAutor', 'idAyudante', 'nombreAutor', 'fotoAutor',
+          'nombreAyudante', 'fotoAyudante', 'idChat', 'fechaAceptacion', 'fechaEntrega', 'tipo',
           'tipoServicio', 'titulo', 'descripcion', 'ubicacion', 'pago', 'estado',
           'urlFotos', 'fechaCreacion', 'soloLectura', 'yaAvisado', 'yaAvisado24h',
-          'calificacionHabilitada']) &&
+          'calificacionHabilitada', 'calificadoPor']) &&
         texto(d.get('id', ''), 0, 1500) &&
         (d.idAutor is path || texto(d.idAutor, 1, 128)) &&
         (d.get('idAyudante', null) == null || texto(d.idAyudante, 1, 128)) &&
-        texto(d.get('nombreAutor', ''), 0, 120) && texto(d.titulo, 1, 200) &&
+        texto(d.get('nombreAutor', ''), 0, 120) && imagen(d.get('fotoAutor', '')) &&
+        texto(d.get('nombreAyudante', ''), 0, 120) && imagen(d.get('fotoAyudante', '')) &&
+        texto(d.get('idChat', ''), 0, 1500) &&
+        d.get('fechaAceptacion', request.time) is timestamp &&
+        d.get('fechaEntrega', request.time) is timestamp &&
+        d.get('calificadoPor', []) is list && d.get('calificadoPor', []).size() <= 2 &&
+        texto(d.titulo, 1, 200) &&
         texto(d.descripcion, 1, 5000) && texto(d.ubicacion, 1, 200) &&
         texto(d.get('tipoServicio', d.get('tipo', '')), 1, 120) &&
         texto(d.get('tipo', ''), 0, 120) &&
@@ -101,11 +108,36 @@ service cloud.firestore {
         d.get('soloLectura', false) is bool && d.get('yaAvisado', false) is bool &&
         d.get('yaAvisado24h', false) is bool && d.get('calificacionHabilitada', false) is bool;
     }
+    function identidadFavor(nombre, foto) {
+      let perfil = get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+      let nombrePerfil = perfil.get('display_name', null);
+      return nombre == (nombrePerfil is string ? nombrePerfil : perfil.get('nombre', '')) &&
+        (foto == '' || foto == perfil.get('fotoPerfil', ''));
+    }
+    function salaNuevaDeFavor(d, id) {
+      let salaId = d.idChat;
+      let sala = /databases/$(database)/documents/chats/$(salaId);
+      return salaId.matches('[^/]+') && !exists(sala) &&
+        getAfter(sala).data.tipoReferencia == 'favor' &&
+        getAfter(sala).data.idReferencia == id &&
+        getAfter(sala).data.soloLectura == false &&
+        participantesFavorCorrectos(d, getAfter(sala).data.participantes);
+    }
+    function salaAnteriorCerrada(d) {
+      let salaId = d.get('idChat', '');
+      return salaId == '' ||
+        getAfter(/databases/$(database)/documents/chats/$(salaId)).data.soloLectura == true;
+    }
     match /favores/{id} {
       allow read: if autenticado();
       allow create: if autenticado() && request.resource.data.idAutor == request.auth.uid &&
         favorValido(request.resource.data) && request.resource.data.estado == 'Publicado' &&
         request.resource.data.get('idAyudante', null) == null &&
+        request.resource.data.get('nombreAyudante', '') == '' &&
+        request.resource.data.get('fotoAyudante', '') == '' &&
+        !request.resource.data.keys().hasAny(['idChat', 'fechaAceptacion', 'fechaEntrega']) &&
+        request.resource.data.get('calificadoPor', []).size() == 0 &&
+        identidadFavor(request.resource.data.get('nombreAutor', ''), request.resource.data.get('fotoAutor', '')) &&
         request.resource.data.get('id', id) == id &&
         request.resource.data.get('calificacionHabilitada', false) == false;
       allow update: if autenticado() && favorValido(request.resource.data) &&
@@ -114,14 +146,30 @@ service cloud.firestore {
             request.resource.data.estado in ['Publicado', 'Cancelado'] &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'titulo', 'descripcion', 'ubicacion', 'pago', 'tipo', 'tipoServicio',
-              'urlFotos', 'nombreAutor', 'fechaCreacion', 'yaAvisado', 'yaAvisado24h', 'estado'])) ||
+              'urlFotos', 'fechaCreacion', 'yaAvisado', 'yaAvisado24h', 'estado'])) ||
           (!esAutor(resource.data.idAutor) && resource.data.estado == 'Publicado' &&
             resource.data.get('idAyudante', null) == null &&
             request.resource.data.estado == 'Aceptado' && request.resource.data.idAyudante == request.auth.uid &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'idAyudante'])) ||
+            (!request.resource.data.keys().hasAny(['idChat']) ||
+              salaNuevaDeFavor(request.resource.data, id)) &&
+            request.resource.data.get('fechaAceptacion', request.time) == request.time &&
+            (!request.resource.data.keys().hasAny(['nombreAyudante', 'fotoAyudante']) ||
+              identidadFavor(request.resource.data.get('nombreAyudante', ''), request.resource.data.get('fotoAyudante', ''))) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'estado', 'idAyudante', 'nombreAyudante', 'fotoAyudante', 'idChat', 'fechaAceptacion'])) ||
+          (resource.data.estado == 'Aceptado' && resource.data.idAyudante == request.auth.uid &&
+            request.resource.data.estado == 'Publicado' &&
+            request.resource.data.get('idAyudante', null) == null &&
+            !request.resource.data.keys().hasAny(['nombreAyudante', 'fotoAyudante', 'idChat', 'fechaAceptacion']) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'estado', 'idAyudante', 'nombreAyudante', 'fotoAyudante', 'idChat', 'fechaAceptacion']) &&
+            salaAnteriorCerrada(resource.data)) ||
           (resource.data.estado == 'Aceptado' && resource.data.idAyudante == request.auth.uid &&
             request.resource.data.estado == 'Entregado' && request.resource.data.calificacionHabilitada == true &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'calificacionHabilitada']))
+            request.resource.data.get('soloLectura', true) == true &&
+            request.resource.data.get('fechaEntrega', request.time) == request.time &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'estado', 'soloLectura', 'calificacionHabilitada', 'fechaEntrega']))
         );
       allow delete: if esAutor(resource.data.idAutor) && resource.data.estado in ['Publicado', 'Cancelado'];
     }
@@ -129,11 +177,12 @@ service cloud.firestore {
     function objetoValido(d) {
       return d.keys().hasOnly(['idDueno', 'nombreDueno', 'titulo', 'descripcion', 'tipo',
           'etiquetaColor', 'lugarCampus', 'urlFoto', 'estadoActual', 'idReclamante',
-          'nombreReclamante', 'fotoPruebaUrl', 'fechaReporte', 'fechaActualizacion', 'soloLectura']) &&
+          'nombreReclamante', 'fotoPruebaUrl', 'dondeQuedo', 'fechaReporte', 'fechaActualizacion', 'soloLectura']) &&
         (d.idDueno is path || texto(d.idDueno, 1, 128)) &&
         texto(d.get('nombreDueno', ''), 0, 120) && texto(d.titulo, 1, 200) &&
         texto(d.descripcion, 1, 5000) && d.tipo in ['perdido', 'encontrado'] &&
-        texto(d.etiquetaColor, 1, 30) && texto(d.lugarCampus, 1, 200) && imagen(d.get('urlFoto', '')) &&
+        texto(d.etiquetaColor, 1, 30) && texto(d.lugarCampus, 1, 200) &&
+        texto(d.get('dondeQuedo', ''), 0, 200) && imagen(d.get('urlFoto', '')) &&
         d.estadoActual in ['Publicado', 'Pendiente', 'Confirmado', 'Entregado'] &&
         (d.get('idReclamante', null) == null || texto(d.idReclamante, 1, 128)) &&
         (d.get('nombreReclamante', null) == null || texto(d.nombreReclamante, 0, 120)) &&
@@ -189,19 +238,38 @@ service cloud.firestore {
         d.soloLectura is bool && d.tipoReferencia in ['favor', 'objeto'] &&
         texto(d.ultimoMensaje, 0, 5000) && d.fechaUltimoMensaje is timestamp;
     }
+    function coincideUid(valor, uid) {
+      return valor == uid || valor == /databases/$(database)/documents/usuarios/$(uid);
+    }
+    function participantesFavorCorrectos(f, participantes) {
+      return f.estado in ['Aceptado', 'Entregado'] && (
+        (coincideUid(f.idAutor, participantes[0]) && coincideUid(f.idAyudante, participantes[1])) ||
+        (coincideUid(f.idAutor, participantes[1]) && coincideUid(f.idAyudante, participantes[0]))
+      );
+    }
     function participantesCorrectos(d) {
       let f = /databases/$(database)/documents/favores/$(d.idReferencia);
       let o = /databases/$(database)/documents/objetos/$(d.idReferencia);
       return (d.tipoReferencia == 'favor' &&
-          get(f).data.idAutor in d.participantes && get(f).data.idAyudante in d.participantes) ||
+          participantesFavorCorrectos(getAfter(f).data, d.participantes)) ||
         (d.tipoReferencia == 'objeto' &&
           get(o).data.idDueno in d.participantes && get(o).data.idReclamante in d.participantes);
     }
     function referenciaCerrada(d) {
       return (d.tipoReferencia == 'favor' &&
-          get(/databases/$(database)/documents/favores/$(d.idReferencia)).data.estado in ['Entregado', 'Cancelado']) ||
+          getAfter(/databases/$(database)/documents/favores/$(d.idReferencia)).data.estado in ['Entregado', 'Cancelado']) ||
         (d.tipoReferencia == 'objeto' &&
           get(/databases/$(database)/documents/objetos/$(d.idReferencia)).data.estadoActual == 'Entregado');
+    }
+    function salaCanceladaPorAyudante(d, chatId) {
+      let refFavor = /databases/$(database)/documents/favores/$(d.idReferencia);
+      let anterior = get(refFavor).data;
+      let nuevo = getAfter(refFavor).data;
+      return d.tipoReferencia == 'favor' &&
+        anterior.estado == 'Aceptado' && anterior.idAyudante == request.auth.uid &&
+        anterior.get('idChat', chatId) == chatId &&
+        participantesFavorCorrectos(anterior, d.participantes) &&
+        nuevo.estado == 'Publicado' && nuevo.get('idAyudante', null) == null;
     }
     function participanteChat(chatId) {
       return autenticado() && request.auth.uid in
@@ -211,13 +279,17 @@ service cloud.firestore {
       allow read: if autenticado() && request.auth.uid in resource.data.participantes;
       allow create: if autenticado() && chatValido(request.resource.data) &&
         request.auth.uid in request.resource.data.participantes &&
-        request.resource.data.soloLectura == false && participantesCorrectos(request.resource.data);
+        participantesCorrectos(request.resource.data) &&
+        (request.resource.data.tipoReferencia == 'favor'
+          ? request.resource.data.soloLectura == referenciaCerrada(request.resource.data)
+          : request.resource.data.soloLectura == false);
       allow update: if autenticado() && request.auth.uid in resource.data.participantes &&
         chatValido(request.resource.data) && (
           (resource.data.soloLectura == false && !referenciaCerrada(resource.data) &&
             participantesCorrectos(resource.data) &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ultimoMensaje', 'fechaUltimoMensaje'])) ||
-          (request.resource.data.soloLectura == true && referenciaCerrada(resource.data) &&
+          (request.resource.data.soloLectura == true &&
+            (referenciaCerrada(resource.data) || salaCanceladaPorAyudante(resource.data, chatId)) &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['soloLectura']))
         );
       allow delete: if false;

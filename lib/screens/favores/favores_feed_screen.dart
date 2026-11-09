@@ -10,6 +10,7 @@ import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
 import '../../utils/favor_load_failure.dart';
 import 'widgets/favor_load_error.dart';
+import 'widgets/favor_presentacion.dart';
 import 'crear_favor_screen.dart';
 import 'favor_detail_screen.dart';
 import 'mi_actividad_favores_screen.dart';
@@ -49,6 +50,14 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
   Widget build(BuildContext context) {
     final feedState = ref.watch(favoresFeedProvider);
     final currentUser = ref.watch(favorSesionUsuarioProvider).valueOrNull;
+    final seguimiento = currentUser == null
+        ? null
+        : ref.watch(seguimientoFavorProvider(currentUser.uid));
+    final favoresVisibles = seguimiento == null || seguimiento.esPublicado
+        ? feedState.favores
+        : feedState.favores
+              .where((favor) => favor.id != seguimiento.id)
+              .toList();
     final resumen = currentUser == null
         ? null
         : ref.watch(resumenFavoresUsuarioProvider(currentUser.uid)).valueOrNull;
@@ -64,16 +73,18 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
         );
       });
     }
-    final nombrePerfil =
-        (resumen?['nombre'] ?? resumen?['display_name'])?.toString().trim();
+    final nombrePerfil = (resumen?['nombre'] ?? resumen?['display_name'])
+        ?.toString()
+        .trim();
     final nombreAuth = currentUser?.displayName?.trim();
     final nombreCompleto = nombrePerfil != null && nombrePerfil.isNotEmpty
         ? nombrePerfil
-        : nombreAuth != null && nombreAuth.isNotEmpty && !nombreAuth.contains('@')
+        : nombreAuth != null &&
+              nombreAuth.isNotEmpty &&
+              !nombreAuth.contains('@')
         ? nombreAuth
         : 'Estudiante';
-    // El encabezado usa solo el primer nombre para que no se corte en móviles.
-    final nombreUsuario = nombreCompleto.split(RegExp(r'\s+')).first;
+    final nombreUsuario = nombreCompleto;
 
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
@@ -114,14 +125,16 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute<void>(
-                  builder: (_) => const PerfilScreen(),
-                ),
+                MaterialPageRoute<void>(builder: (_) => const PerfilScreen()),
               );
             },
           ),
           IconButton(
-            icon: const Icon(Icons.history_rounded),
+            style: IconButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.history_rounded, color: Colors.white),
             tooltip: 'Mi actividad de favores',
             onPressed: currentUser == null
                 ? null
@@ -133,18 +146,11 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                     ),
                   ),
           ),
-          IconButton(
-            icon: const Icon(
-              Icons.inventory_2_outlined,
-              color: AppTheme.primaryColor,
-            ),
-            tooltip: 'Artículos Perdidos y Encontrados',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ArticulosScreen()),
-              );
-            },
+          const IconButton(
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            disabledColor: AppTheme.primaryColor,
+            tooltip: 'Chat',
+            onPressed: null,
           ),
         ],
       ),
@@ -153,21 +159,62 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
         children: [
           const SizedBox(height: 12),
 
-          // 1. Bar de Filtros por Categoría con Íconos (Mockup image7.png)
-          SizedBox(
-            height: 46,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _buildSectionCard(
+                      icon: Icons.volunteer_activism_rounded,
+                      title: 'Favores',
+                      subtitle: 'Pide o brinda una mano',
+                      colors: const [
+                        AppTheme.primaryColor,
+                        AppTheme.primaryLight,
+                      ],
+                      foreground: Colors.white,
+                      onTap: () => ref
+                          .read(favoresFeedProvider.notifier)
+                          .cambiarFiltro('Todos'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildSectionCard(
+                      icon: Icons.inventory_2_rounded,
+                      title: 'Reporte de objetos',
+                      subtitle: 'Perdidos y encontrados',
+                      colors: const [
+                        AppTheme.doradoClaro,
+                        AppTheme.doradoSuave,
+                      ],
+                      foreground: AppTheme.primaryColor,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ArticulosScreen(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Filtros rápidos de favores
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _buildCategoryChip(
                   'Todos',
                   Icons.grid_view_rounded,
-                  feedState.filtroTipo,
-                ),
-                _buildCategoryChip(
-                  'Objetos',
-                  Icons.inventory_2_outlined,
                   feedState.filtroTipo,
                 ),
                 _buildCategoryChip(
@@ -180,17 +227,33 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                   Icons.directions_bike_outlined,
                   feedState.filtroTipo,
                 ),
-                ...AppConstants.tiposFavores
-                    .where(
-                      (t) => !['Objetos', 'Apuntes', 'Domicilio'].contains(t),
-                    )
-                    .map(
-                      (t) => _buildCategoryChip(
-                        t,
-                        Icons.category_outlined,
-                        feedState.filtroTipo,
-                      ),
-                    ),
+                MenuAnchor(
+                  builder: (context, controller, _) => _buildCategoryChip(
+                    'Más filtros',
+                    Icons.expand_more_rounded,
+                    const [
+                          'Todos',
+                          'Apuntes',
+                          'Domicilio',
+                        ].contains(feedState.filtroTipo)
+                        ? ''
+                        : 'Más filtros',
+                    onTap: controller.open,
+                  ),
+                  menuChildren: [
+                    for (final tipo in AppConstants.tiposFavores)
+                      if (tipo != 'Apuntes' && tipo != 'Domicilio')
+                        MenuItemButton(
+                          leadingIcon: tipo == feedState.filtroTipo
+                              ? const Icon(Icons.check)
+                              : null,
+                          onPressed: () => ref
+                              .read(favoresFeedProvider.notifier)
+                              .cambiarFiltro(tipo),
+                          child: Text(tipo),
+                        ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -252,10 +315,10 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                           children: [
                             Text(
                               ((resumen?['promedioCalificacion'] ??
-                                          resumen?['promedio'])
-                                      as num?)
-                                  ?.toStringAsFixed(1) ??
-                              '0.0',
+                                              resumen?['promedio'])
+                                          as num?)
+                                      ?.toStringAsFixed(1) ??
+                                  '0.0',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 24,
@@ -317,11 +380,13 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
               onRefresh: () async {
                 await ref.read(favoresFeedProvider.notifier).cargarInicial();
               },
-              child: feedState.favores.isEmpty && !feedState.isLoading
+              child: favoresVisibles.isEmpty && !feedState.isLoading
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(32),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
                       children: [
+                        if (seguimiento != null)
+                          _SeguimientoFavor(favor: seguimiento),
                         if (feedState.fallo != null || feedState.error != null)
                           FavorLoadError(
                             failure:
@@ -336,7 +401,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                           )
                         else ...[
                           const Icon(
-                            Icons.inbox_outlined,
+                            Icons.chat_bubble_outline_rounded,
                             size: 64,
                             color: Colors.grey,
                           ),
@@ -357,12 +422,18 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                         bottom: 80,
                       ),
                       itemCount:
-                          feedState.favores.length +
+                          favoresVisibles.length +
+                          (seguimiento == null ? 0 : 1) +
                           (feedState.isLoading || feedState.error != null
                               ? 1
                               : 0),
                       itemBuilder: (context, index) {
-                        if (index == feedState.favores.length) {
+                        if (seguimiento != null && index == 0) {
+                          return _SeguimientoFavor(favor: seguimiento);
+                        }
+                        final indiceFavor =
+                            index - (seguimiento == null ? 0 : 1);
+                        if (indiceFavor == favoresVisibles.length) {
                           if (feedState.error != null) {
                             return TextButton(
                               onPressed: () => ref
@@ -379,7 +450,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                           );
                         }
 
-                        final favor = feedState.favores[index];
+                        final favor = favoresVisibles[indiceFavor];
                         return _FavorCardMockup(favor: favor);
                       },
                     ),
@@ -421,48 +492,195 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
     );
   }
 
-  Widget _buildCategoryChip(String label, IconData icon, String filtroActual) {
+  Widget _buildCategoryChip(
+    String label,
+    IconData icon,
+    String filtroActual, {
+    VoidCallback? onTap,
+  }) {
     final isSelected = filtroActual == label;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: InkWell(
-        onTap: () {
-          if (label == 'Objetos') {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ArticulosScreen()),
-            );
-          } else {
-            ref.read(favoresFeedProvider.notifier).cambiarFiltro(label);
-          }
-        },
-        borderRadius: BorderRadius.circular(25),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.primaryColor : Colors.white,
-            borderRadius: BorderRadius.circular(25),
-            border: Border.all(
-              color: isSelected ? AppTheme.primaryColor : Colors.grey.shade300,
-            ),
+    return InkWell(
+      onTap:
+          onTap ??
+          () => ref.read(favoresFeedProvider.notifier).cambiarFiltro(label),
+      borderRadius: BorderRadius.circular(25),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryColor : Colors.white,
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(
+            color: isSelected ? AppTheme.primaryColor : Colors.grey.shade300,
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 18,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isSelected ? Colors.white : const Color(0xFF475569),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
                 color: isSelected ? Colors.white : const Color(0xFF475569),
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                fontSize: 13,
               ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : const Color(0xFF475569),
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  fontSize: 13,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required List<Color> colors,
+    required Color foreground,
+    required VoidCallback onTap,
+  }) => Material(
+    color: Colors.transparent,
+    borderRadius: BorderRadius.circular(20),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 112),
+        child: Ink(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: colors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: colors.first.withValues(alpha: 0.2),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(icon, color: foreground, size: 25),
+              const SizedBox(height: 8),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: foreground.withValues(alpha: 0.85),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _SeguimientoFavor extends StatelessWidget {
+  const _SeguimientoFavor({required this.favor});
+
+  final FavorModel favor;
+
+  @override
+  Widget build(BuildContext context) {
+    final paso = favor.esEntregado ? 3 : (favor.esAceptado ? 2 : 1);
+    final mensaje = switch (paso) {
+      3 => 'Entrega confirmada',
+      2 => 'Favor aceptado · coordinen el encuentro',
+      _ => 'Esperando a que alguien acepte',
+    };
+    const duracion = Duration(milliseconds: 250);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: AppTheme.doradoClaro,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => FavorDetailScreen(favorId: favor.id),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.route_outlined,
+                    size: 18,
+                    color: AppTheme.primaryColor,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Seguimiento del favor',
+                      style: TextStyle(
+                        color: AppTheme.primaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      favor.titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+              AnimatedSwitcher(
+                duration: duracion,
+                layoutBuilder: (actual, anteriores) => Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [...anteriores, ?actual],
                 ),
+                child: Text(mensaje, key: ValueKey(paso)),
               ),
+              if (favor.ubicacion.isNotEmpty)
+                Text(
+                  favor.ubicacion,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              const SizedBox(height: 10),
+              FavorProgreso(favor: favor),
             ],
           ),
         ),
@@ -646,20 +864,7 @@ class _FavorCardMockup extends StatelessWidget {
                 // Fila Inferior: Avatar + Nombre + Tiempo + Botón Ver Favor
                 Row(
                   children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: AppTheme.primaryColor.withValues(
-                        alpha: 0.15,
-                      ),
-                      child: const Text(
-                        'USC',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
-                    ),
+                    FavorAvatar(foto: favor.fotoAutor, radius: 18),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(

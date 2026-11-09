@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../config/app_constants.dart';
+
 /// Máquina de Estados estricta para Objetos (RF13)
 /// Secuencia estricta: Publicado -> Pendiente -> Confirmado -> Entregado.
 /// Retroceso permitido únicamente a Publicado por rechazo o no entrega.
@@ -32,13 +34,16 @@ enum EstadoObjeto {
     if (this == EstadoObjeto.entregado) return false;
 
     // Transiciones hacia adelante estrictas
-    if (this == EstadoObjeto.publicado && nuevoEstado == EstadoObjeto.pendiente) {
+    if (this == EstadoObjeto.publicado &&
+        nuevoEstado == EstadoObjeto.pendiente) {
       return true;
     }
-    if (this == EstadoObjeto.pendiente && nuevoEstado == EstadoObjeto.confirmado) {
+    if (this == EstadoObjeto.pendiente &&
+        nuevoEstado == EstadoObjeto.confirmado) {
       return true;
     }
-    if (this == EstadoObjeto.confirmado && nuevoEstado == EstadoObjeto.entregado) {
+    if (this == EstadoObjeto.confirmado &&
+        nuevoEstado == EstadoObjeto.entregado) {
       return true;
     }
 
@@ -70,14 +75,17 @@ class ObjetoModel {
     this.idReclamante,
     this.nombreReclamante,
     this.fotoPruebaUrl,
+    this.dondeQuedo = '',
     required this.fechaReporte,
     this.fechaActualizacion,
     this.soloLectura = false,
+    this.esDemostracion = false,
   });
 
   final String id;
   final String idDueno;
   final String nombreDueno;
+
   final String titulo;
   final String descripcion;
   final String tipo; // 'perdido' | 'encontrado'
@@ -88,9 +96,13 @@ class ObjetoModel {
   final String? idReclamante;
   final String? nombreReclamante;
   final String? fotoPruebaUrl;
+  final String dondeQuedo;
   final DateTime fechaReporte;
   final DateTime? fechaActualizacion;
   final bool soloLectura;
+
+  /// Registro local de previsualización; nunca se escribe en Firestore.
+  final bool esDemostracion;
 
   // Getters de conveniencia
   bool get esPerdido => tipo.toLowerCase() == 'perdido';
@@ -100,6 +112,9 @@ class ObjetoModel {
   bool get esConfirmado => estadoActual == 'Confirmado';
   bool get esEntregado => estadoActual == 'Entregado';
   bool get casoCerrado => esEntregado || soloLectura;
+
+  bool puedeEliminar(String uid) =>
+      uid.isNotEmpty && idDueno == uid && esPublicado;
 
   EstadoObjeto get estadoEnum => EstadoObjeto.fromString(estadoActual);
 
@@ -123,6 +138,7 @@ class ObjetoModel {
       'idReclamante': idReclamante,
       'nombreReclamante': nombreReclamante,
       'fotoPruebaUrl': fotoPruebaUrl,
+      'dondeQuedo': dondeQuedo,
       'fechaReporte': Timestamp.fromDate(fechaReporte),
       'fechaActualizacion': fechaActualizacion != null
           ? Timestamp.fromDate(fechaActualizacion!)
@@ -143,26 +159,31 @@ class ObjetoModel {
     }
 
     final estado = map['estadoActual'] as String? ?? 'Publicado';
-    final soloLect = (map['soloLectura'] as bool? ?? false) || estado == 'Entregado';
+    final soloLect =
+        (map['soloLectura'] as bool? ?? false) || estado == 'Entregado';
 
     return ObjetoModel(
       id: id,
       idDueno: rawDueno is DocumentReference
           ? rawDueno.id
           : rawDueno is String
-              ? rawDueno.split('/').last
-              : '',
+          ? rawDueno.split('/').last
+          : '',
       nombreDueno: map['nombreDueno'] as String? ?? '',
       titulo: map['titulo'] as String? ?? '',
       descripcion: map['descripcion'] as String? ?? '',
       tipo: map['tipo'] as String? ?? 'perdido',
       etiquetaColor: map['etiquetaColor'] as String? ?? 'rojo',
-      lugarCampus: map['lugarCampus'] as String? ?? '',
+      lugarCampus:
+          map['lugarCampus'] == 'Bloque 6 - Cafetería Central / Plazoleta'
+          ? AppConstants.laboratorioMatematicas
+          : map['lugarCampus'] as String? ?? '',
       urlFoto: map['urlFoto'] as String? ?? '',
       estadoActual: estado,
       idReclamante: map['idReclamante'] as String?,
       nombreReclamante: map['nombreReclamante'] as String?,
       fotoPruebaUrl: map['fotoPruebaUrl'] as String?,
+      dondeQuedo: map['dondeQuedo'] as String? ?? '',
       fechaReporte: parseFecha(rawFechaReporte),
       fechaActualizacion: rawFechaAct != null ? parseFecha(rawFechaAct) : null,
       soloLectura: soloLect,
@@ -183,9 +204,11 @@ class ObjetoModel {
     String? idReclamante,
     String? nombreReclamante,
     String? fotoPruebaUrl,
+    String? dondeQuedo,
     DateTime? fechaReporte,
     DateTime? fechaActualizacion,
     bool? soloLectura,
+    bool? esDemostracion,
   }) {
     return ObjetoModel(
       id: id ?? this.id,
@@ -201,9 +224,11 @@ class ObjetoModel {
       idReclamante: idReclamante ?? this.idReclamante,
       nombreReclamante: nombreReclamante ?? this.nombreReclamante,
       fotoPruebaUrl: fotoPruebaUrl ?? this.fotoPruebaUrl,
+      dondeQuedo: dondeQuedo ?? this.dondeQuedo,
       fechaReporte: fechaReporte ?? this.fechaReporte,
       fechaActualizacion: fechaActualizacion ?? this.fechaActualizacion,
       soloLectura: soloLectura ?? this.soloLectura,
+      esDemostracion: esDemostracion ?? this.esDemostracion,
     );
   }
 }

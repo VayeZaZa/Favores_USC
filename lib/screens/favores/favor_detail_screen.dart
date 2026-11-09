@@ -1,6 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -10,6 +9,9 @@ import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
 import '../chat/chat_room_screen.dart';
+import '../widgets/confirmar_borrado.dart';
+import 'widgets/calificar_favor_sheet.dart';
+import 'widgets/favor_presentacion.dart';
 
 /// Pantalla de Consultar / Detalle del Favor ajustada 100% a la maqueta visual (image8.png, image9.png)
 class FavorDetailScreen extends ConsumerStatefulWidget {
@@ -23,6 +25,66 @@ class FavorDetailScreen extends ConsumerStatefulWidget {
 
 class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
   bool _isProcessing = false;
+
+  Future<void> _eliminarFavor(FavorModel favor, String uid) async {
+    if (_isProcessing) return;
+    final confirmado = await confirmarBorradoPublicacion(
+      context,
+      tipo: 'favor',
+      titulo: favor.titulo,
+    );
+    if (!confirmado || !mounted || _isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      await ref
+          .read(favorServiceProvider)
+          .eliminarFavor(favor.id, idAutor: uid);
+      if (!mounted) return;
+      ref.invalidate(favoresFeedProvider);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Favor borrado.')));
+      Navigator.pop(context);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _cancelarAceptacion(FavorModel favor, String uid) async {
+    if (_isProcessing) return;
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Cancelar tu aceptación?'),
+        content: const Text(
+          'El favor volverá a estar disponible y el chat de este encuentro se cerrará.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Volver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancelar aceptación'),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true || !mounted) return;
+    await _realizarAccion(() async {
+      await ref
+          .read(favorServiceProvider)
+          .cancelarAceptacion(favorId: favor.id, idAyudante: uid);
+      if (mounted) ref.invalidate(favoresFeedProvider);
+    }, 'El favor volvió a estar disponible.');
+  }
 
   Future<void> _realizarAccion(
     Future<void> Function() accion,
@@ -51,65 +113,41 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
   Future<void> _mostrarDialogoCalificacion(FavorModel favor) async {
     final uid = AuthService().currentUser?.uid;
     if (uid == null || !favor.puedeCalificar(uid) || _isProcessing) return;
-    int estrellas = 5;
-    String comentario = '';
-    final enviar = await showDialog<bool>(
+
+    final destino = favor.otroParticipante(uid);
+    if (destino == null || destino.isEmpty) return;
+    final calificaAlAutor = destino == favor.idAutor;
+    final nombre = calificaAlAutor ? favor.nombreAutor : favor.nombreAyudante;
+    final foto = calificaAlAutor ? favor.fotoAutor : favor.fotoAyudante;
+    final servicio = ref.read(favorServiceProvider);
+    final guardado = await showModalBottomSheet<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Calificar el favor'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('¿Cómo fue tu experiencia con el otro participante?'),
-              const SizedBox(height: 16),
-              RatingBar.builder(
-                initialRating: 5,
-                minRating: 1,
-                allowHalfRating: false,
-                itemCount: 5,
-                itemSize: 32,
-                itemBuilder: (_, index) =>
-                    const Icon(Icons.star, color: Colors.amber),
-                onRatingUpdate: (valor) => estrellas = valor.toInt(),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                maxLength: 300,
-                maxLines: 3,
-                onChanged: (valor) => comentario = valor,
-                decoration: const InputDecoration(
-                  labelText: 'Comentario opcional',
-                ),
-              ),
-            ],
-          ),
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (_) => CalificarFavorSheet(
+        tituloFavor: favor.titulo,
+        nombre: nombre.isEmpty ? 'Estudiante USC' : nombre,
+        foto: foto,
+        enviar: (estrellas, comentario) => servicio.calificarUsuario(
+          favorId: favor.id,
+          idAutorCalificador: uid,
+          idDestinatario: destino,
+          estrellas: estrellas,
+          comentario: comentario,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Enviar'),
-          ),
-        ],
       ),
     );
-    if (enviar != true || !mounted) return;
-    await _realizarAccion(
-      () => ref
-          .read(favorServiceProvider)
-          .calificarUsuario(
-            favorId: favor.id,
-            idAutorCalificador: uid,
-            idDestinatario: favor.otroParticipante(uid)!,
-            estrellas: estrellas,
-            comentario: comentario,
-          ),
-      '¡Calificación enviada correctamente!',
-    );
+    if (guardado == true && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('¡Calificación guardada!')));
+    }
   }
 
   Future<void> _mostrarDialogoReporte(FavorModel favor) async {
@@ -189,7 +227,7 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
     if (uid == null || !favor.puedeAbrirChat(uid) || _isProcessing) return;
     setState(() => _isProcessing = true);
     try {
-      await ref
+      final salaId = await ref
           .read(favorServiceProvider)
           .prepararChatFavor(favor.id, idUsuario: uid);
       if (!mounted) return;
@@ -197,12 +235,15 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
         context,
         MaterialPageRoute<void>(
           builder: (_) => ChatRoomScreen(
+            salaId: salaId,
             idReferencia: favor.id,
             tipoReferencia: 'favor',
             tituloReferencia: favor.titulo,
             otroUsuarioId: favor.otroParticipante(uid)!,
             otroUsuarioNombre: uid == favor.idAutor
-                ? 'Ayudante'
+                ? (favor.nombreAyudante.isEmpty
+                      ? 'Ayudante'
+                      : favor.nombreAyudante)
                 : (favor.nombreAutor.isEmpty
                       ? 'Solicitante'
                       : favor.nombreAutor),
@@ -343,6 +384,9 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
   Widget build(BuildContext context) {
     final currentUser = AuthService().currentUser;
     final favorAsync = ref.watch(favorDetailStreamProvider(widget.favorId));
+    final calificados = currentUser == null
+        ? null
+        : ref.watch(favoresCalificadosProvider(currentUser.uid)).valueOrNull;
 
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
@@ -353,12 +397,35 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1E293B)),
           onPressed: () => Navigator.pop(context),
         ),
+        title: favorAsync.when(
+          data: (favor) => Text(
+            favor?.esAceptado == true
+                ? 'Favor en curso'
+                : favor?.esEntregado == true
+                ? 'Favor entregado'
+                : 'Detalle del favor',
+          ),
+          loading: () => const Text('Detalle del favor'),
+          error: (_, _) => const Text('Detalle del favor'),
+        ),
         actions: [
           favorAsync.when(
             data: (favor) {
-              if (favor == null ||
-                  !favor.esEntregado ||
-                  !favor.esParticipante(currentUser?.uid ?? '')) {
+              final uid = currentUser?.uid ?? '';
+              if (favor == null) return const SizedBox.shrink();
+              if (favor.puedeEliminar(uid)) {
+                return IconButton(
+                  tooltip: 'Borrar favor',
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppTheme.errorColor,
+                  ),
+                  onPressed: _isProcessing
+                      ? null
+                      : () => _eliminarFavor(favor, uid),
+                );
+              }
+              if (!favor.esEntregado || !favor.esParticipante(uid)) {
                 return const SizedBox.shrink();
               }
               return IconButton(
@@ -381,6 +448,12 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
 
           final esAutor = currentUser?.uid == favor.idAutor;
           final esAyudante = currentUser?.uid == favor.idAyudante;
+          final uid = currentUser?.uid ?? '';
+          final yaCalificado =
+              favor.calificadoPor.contains(uid) ||
+              (calificados?.contains(favor.id) ?? false);
+          final puedeCalificar =
+              favor.puedeCalificar(uid) && calificados != null && !yaCalificado;
 
           return Column(
             children: [
@@ -393,6 +466,15 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (!yaCalificado)
+                        Card(
+                          color: AppTheme.doradoClaro,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: FavorProgreso(favor: favor),
+                          ),
+                        ),
                       // Fotos superior (Mockup image9.png)
                       if (favor.urlFotos.isNotEmpty)
                         SizedBox(
@@ -475,10 +557,22 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                       _buildInfoCard(
                         icon: Icons.person_outline_rounded,
                         title: 'Solicitante',
-                        subtitle: esAutor
-                            ? 'Tú (Autor del favor)'
-                            : 'Estudiante USC',
+                        subtitle: favor.nombreAutor.isEmpty
+                            ? (esAutor ? 'Tú' : 'Estudiante USC')
+                            : favor.nombreAutor,
+                        foto: favor.fotoAutor,
                       ),
+                      if (favor.idAyudante?.isNotEmpty == true) ...[
+                        const SizedBox(height: 12),
+                        _buildInfoCard(
+                          icon: Icons.person_outline_rounded,
+                          title: 'Ayudante',
+                          subtitle: favor.nombreAyudante.isEmpty
+                              ? (esAyudante ? 'Tú' : 'Estudiante USC')
+                              : favor.nombreAyudante,
+                          foto: favor.fotoAyudante,
+                        ),
+                      ],
                       const SizedBox(height: 24),
 
                       // Descripción detallada
@@ -500,182 +594,98 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-
-                      // Seguimiento del Caso (Timeline / Stepper del Mockup image8.png)
-                      Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Seguimiento del caso',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E293B),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            _buildTimelineStep(
-                              label: 'Favor publicado con éxito',
-                              isDone: true,
-                              color: Colors.green,
-                            ),
-                            _buildTimelineStep(
-                              label: favor.esPublicado
-                                  ? 'Esperando que un ayudante acepte'
-                                  : 'Favor aceptado por un ayudante',
-                              isDone: favor.esAceptado || favor.esEntregado,
-                              color: AppTheme.primaryColor,
-                            ),
-                            _buildTimelineStep(
-                              label: favor.esEntregado
-                                  ? 'Entrega realizada con éxito'
-                                  : 'Entrega en camino',
-                              isDone: favor.esEntregado,
-                              color: favor.esEntregado
-                                  ? Colors.green
-                                  : Colors.grey.shade300,
-                              isLast: true,
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                 ),
               ),
 
-              // Sticky Bottom Action Bar con Botón Chat y Acciones (Mockup image8.png)
               Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
+                  border: Border(top: BorderSide(color: Color(0xFFE4EBF5))),
                 ),
-                child: Row(
-                  children: [
-                    // Botón "Chat con Solicitante" (Mockup image8.png)
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed:
-                            !_isProcessing &&
-                                favor.puedeAbrirChat(currentUser?.uid ?? '')
-                            ? () => _abrirChat(favor)
-                            : null,
-                        icon: const Icon(
-                          Icons.chat_bubble_outline_rounded,
-                          color: Colors.white,
-                        ),
-                        label: const Text(
-                          'Chat',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1D4ED8),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // Botón Acción según Estado (Aceptar / Confirmar Pago / Calificar)
-                    Expanded(
-                      child: _isProcessing
-                          ? const Center(child: CircularProgressIndicator())
-                          : favor.esPublicado && !esAutor
-                          ? ElevatedButton.icon(
-                              onPressed: () => _aceptarFavor(favor),
-                              icon: const Icon(
-                                Icons.check_circle_outline,
-                                color: Colors.white,
-                              ),
-                              label: const Text(
-                                'Aceptar',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryColor,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                            )
-                          : favor.esAceptado && esAyudante
-                          ? ElevatedButton.icon(
-                              onPressed: () => _confirmarPago(favor),
-                              icon: const Icon(
-                                Icons.task_alt_rounded,
-                                color: Colors.white,
-                              ),
-                              label: const Text(
-                                'Confirmar pago recibido',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                            )
-                          : favor.puedeCalificar(currentUser?.uid ?? '')
-                          ? ElevatedButton.icon(
-                              onPressed: () =>
-                                  _mostrarDialogoCalificacion(favor),
-                              icon: const Icon(Icons.star, color: Colors.white),
-                              label: const Text(
-                                'Calificar',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.amber.shade800,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                            )
-                          : OutlinedButton(
-                              onPressed: null,
-                              child: Text(favor.estado),
+                child: SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _botonAccion(
+                              icono: Icons.chat_bubble_outline_rounded,
+                              texto: 'Chat',
+                              onPressed:
+                                  !_isProcessing && favor.puedeAbrirChat(uid)
+                                  ? () => _abrirChat(favor)
+                                  : null,
                             ),
-                    ),
-                  ],
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _isProcessing
+                                ? const Center(
+                                    child: CircularProgressIndicator(),
+                                  )
+                                : favor.esPublicado &&
+                                      !esAutor &&
+                                      uid.isNotEmpty
+                                ? _botonAccion(
+                                    icono: Icons.check_circle_outline,
+                                    texto: 'Aceptar',
+                                    dorado: true,
+                                    onPressed: () => _aceptarFavor(favor),
+                                  )
+                                : favor.puedeCancelarAceptacion(uid)
+                                ? _botonAccion(
+                                    icono: Icons.task_alt_rounded,
+                                    texto: 'Confirmar pago',
+                                    dorado: true,
+                                    onPressed: () => _confirmarPago(favor),
+                                  )
+                                : puedeCalificar
+                                ? _botonAccion(
+                                    icono: Icons.star_rounded,
+                                    texto: 'Calificar',
+                                    dorado: true,
+                                    onPressed: () =>
+                                        _mostrarDialogoCalificacion(favor),
+                                  )
+                                : Center(
+                                    child: Chip(
+                                      backgroundColor: yaCalificado
+                                          ? AppTheme.doradoClaro
+                                          : AppTheme.surfaceColor,
+                                      label: Text(
+                                        yaCalificado
+                                            ? 'Calificado'
+                                            : favor.estado,
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ],
+                      ),
+                      if (favor.puedeCancelarAceptacion(uid)) ...[
+                        const SizedBox(height: 4),
+                        TextButton.icon(
+                          onPressed: _isProcessing
+                              ? null
+                              : () => _cancelarAceptacion(favor, uid),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.errorColor,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                          ),
+                          icon: const Icon(Icons.undo_rounded, size: 18),
+                          label: const Text('Cancelar aceptación'),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -688,10 +698,30 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
     );
   }
 
+  Widget _botonAccion({
+    required IconData icono,
+    required String texto,
+    required VoidCallback? onPressed,
+    bool dorado = false,
+  }) => FilledButton.icon(
+    onPressed: onPressed,
+    icon: Icon(icono, size: 19),
+    label: Text(texto, textAlign: TextAlign.center),
+    style: FilledButton.styleFrom(
+      minimumSize: const Size(0, 52),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      backgroundColor: dorado ? AppTheme.accentColor : AppTheme.primaryColor,
+      foregroundColor: dorado ? AppTheme.primaryColor : Colors.white,
+      textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    ),
+  );
+
   Widget _buildInfoCard({
     required IconData icon,
     required String title,
     required String subtitle,
+    String? foto,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -702,14 +732,17 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
+          if (foto != null)
+            FavorAvatar(foto: foto, radius: 21)
+          else
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: AppTheme.primaryColor, size: 22),
             ),
-            child: Icon(icon, color: AppTheme.primaryColor, size: 22),
-          ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -737,55 +770,6 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildTimelineStep({
-    required String label,
-    required bool isDone,
-    required Color color,
-    bool isLast = false,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: isDone ? color : Colors.grey.shade300,
-                shape: BoxShape.circle,
-              ),
-            ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 24,
-                color: isDone
-                    ? color.withValues(alpha: 0.5)
-                    : Colors.grey.shade200,
-              ),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 0),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isDone ? FontWeight.bold : FontWeight.normal,
-                color: isDone
-                    ? const Color(0xFF1E293B)
-                    : const Color(0xFF94A3B8),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

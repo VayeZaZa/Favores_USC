@@ -29,10 +29,25 @@ class FavorValidators {
         : null;
   }
 
-  static String? ubicacion(String? valor) =>
-      AppConstants.puntosCampus.contains(valor)
-      ? null
-      : 'Selecciona un punto fijo válido dentro del campus USC.';
+  static String? ubicacion(String? valor) {
+    if (AppConstants.puntosCampus.contains(valor)) return null;
+    if (valor != null && valor.runes.length <= 200) {
+      final detalle = RegExp(
+        r'^([^·\r\n]+?)(?: · Piso ([^·\r\n]+))?(?: · Salón ([^·\r\n]+))?(?: · Detalles: ([^·\r\n]+))?$',
+      ).firstMatch(valor);
+      if (detalle != null) {
+        final punto = detalle.group(1);
+        final incluyePisoOSalon =
+            detalle.group(2) != null || detalle.group(3) != null;
+        if (AppConstants.puntosCampus.contains(punto) &&
+            (!incluyePisoOSalon ||
+                AppConstants.bloquesCampus.contains(punto))) {
+          return null;
+        }
+      }
+    }
+    return 'Selecciona un punto fijo válido dentro del campus USC.';
+  }
 
   static String? tipo(String? valor) =>
       AppConstants.tiposFavores.contains(valor)

@@ -7,6 +7,8 @@ class AppTheme {
   static const Color primaryDark = Color(0xFF0D1534);
   static const Color primaryLight = Color(0xFF28365F);
   static const Color accentColor = Color(0xFFFFD981);
+  static const Color doradoClaro = Color(0xFFF7E8C4);
+  static const Color doradoSuave = Color(0xFFE9CB8B);
   static const Color surfaceColor = Color(0xFFF5F7FA);
   static const Color cardColor = Colors.white;
   static const Color textPrimary = Color(0xFF1E1E1E);

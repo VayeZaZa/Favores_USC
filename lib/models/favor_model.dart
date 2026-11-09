@@ -5,7 +5,10 @@ class FavorModel {
   final String id;
   final String idAutor; // Referencia al usuario creador
   final String nombreAutor;
+  final String fotoAutor;
   final String? idAyudante; // Referencia al usuario que acepta el favor
+  final String nombreAyudante;
+  final String fotoAyudante;
   final String tipoServicio;
   final String titulo;
   final String descripcion;
@@ -24,7 +27,10 @@ class FavorModel {
     required this.id,
     required this.idAutor,
     this.nombreAutor = '',
+    this.fotoAutor = '',
     this.idAyudante,
+    this.nombreAyudante = '',
+    this.fotoAyudante = '',
     required this.tipoServicio,
     required this.titulo,
     required this.descripcion,
@@ -45,6 +51,12 @@ class FavorModel {
   bool get esAceptado => estado == 'Aceptado';
   bool get esEntregado => estado == 'Entregado';
   bool get esCancelado => estado == 'Cancelado';
+
+  bool puedeEliminar(String uid) =>
+      uid.isNotEmpty && idAutor == uid && (esPublicado || esCancelado);
+
+  bool puedeCancelarAceptacion(String uid) =>
+      uid.isNotEmpty && idAyudante == uid && esAceptado;
 
   bool esParticipante(String usuarioId) =>
       usuarioId.isNotEmpty && (usuarioId == idAutor || usuarioId == idAyudante);
@@ -73,6 +85,7 @@ class FavorModel {
       'idAutor': idAutor,
       'idAyudante': idAyudante,
       'nombreAutor': nombreAutor,
+      if (fotoAutor.isNotEmpty) 'fotoAutor': fotoAutor,
       'tipo': tipoServicio,
       'tipoServicio': tipoServicio,
       'titulo': titulo,
@@ -104,6 +117,9 @@ class FavorModel {
       id: id,
       idAutor: idAutor,
       nombreAutor: map['nombreAutor'] as String? ?? '',
+      fotoAutor: map['fotoAutor'] as String? ?? '',
+      nombreAyudante: map['nombreAyudante'] as String? ?? '',
+      fotoAyudante: map['fotoAyudante'] as String? ?? '',
       idAyudante: map['idAyudante'] is DocumentReference
           ? (map['idAyudante'] as DocumentReference).id
           : (map['idAyudante'] as String?)?.split('/').last,

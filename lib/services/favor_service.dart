@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -26,8 +25,11 @@ class FavorService {
 
   static String chatId(String favorId) => 'favor_$favorId';
 
+  static String _nombrePerfil(Map<String, dynamic> datos) =>
+      datos['display_name'] as String? ?? datos['nombre'] as String? ?? '';
+
   static String calificacionId(String favorId, String usuarioId) =>
-      base64Url.encode(utf8.encode(jsonEncode([favorId, usuarioId])));
+      '${favorId}_$usuarioId';
 
   FavorService({
     FirebaseFirestore? firestore,
@@ -83,10 +85,8 @@ class FavorService {
     final favor = FavorModel(
       id: newDoc.id,
       idAutor: idAutor,
-      nombreAutor:
-          datosAutor['display_name'] as String? ??
-          datosAutor['nombre'] as String? ??
-          '',
+      nombreAutor: _nombrePerfil(datosAutor),
+      fotoAutor: datosAutor['fotoPerfil'] as String? ?? '',
       tipoServicio: tipo,
       titulo: titulo.trim(),
       descripcion: descripcion.trim(),
@@ -117,7 +117,8 @@ class FavorService {
   }) async {
     _verificarSesion(idAyudante);
     final favorRef = _favoresRef.doc(favorId);
-    final salaRef = _firestore.collection('chats').doc(chatId(favorId));
+    // Cada aceptación tiene una sala propia, incluso si vuelve el mismo ayudante.
+    final salaRef = _firestore.collection('chats').doc();
     await _firestore.runTransaction((tx) async {
       final snapshot = await tx.get(favorRef);
       if (!snapshot.exists) throw Exception('El favor no existe.');
@@ -134,18 +135,18 @@ class FavorService {
       if (!favor.esPublicado || (favor.idAyudante?.isNotEmpty ?? false)) {
         throw Exception('Este favor ya fue tomado o no está disponible.');
       }
-      final autor = await tx.get(_usuariosRef.doc(favor.idAutor));
       final ayudante = await tx.get(_usuariosRef.doc(idAyudante));
-      final sala = await tx.get(salaRef);
-      if (!autor.exists || !ayudante.exists) {
-        throw Exception('No se encontraron los perfiles de los participantes.');
+      if (!ayudante.exists) {
+        throw Exception('No encontramos tu perfil de estudiante.');
       }
-      if (sala.exists) throw Exception('El favor ya tiene una sala asociada.');
-      final autorData = autor.data() as Map<String, dynamic>;
       final ayudanteData = ayudante.data() as Map<String, dynamic>;
+      final nombreAyudante = _nombrePerfil(ayudanteData);
+      final fotoAyudante = ayudanteData['fotoPerfil'] as String? ?? '';
       tx.update(favorRef, {
         'estado': 'Aceptado',
         'idAyudante': idAyudante,
+        'nombreAyudante': nombreAyudante,
+        if (fotoAyudante.isNotEmpty) 'fotoAyudante': fotoAyudante,
         'idChat': salaRef.id,
         'fechaAceptacion': FieldValue.serverTimestamp(),
       });
@@ -155,14 +156,8 @@ class FavorService {
         'tituloReferencia': favor.titulo,
         'participantes': [favor.idAutor, idAyudante],
         'nombresParticipantes': {
-          favor.idAutor:
-              autorData['nombre'] ??
-              autorData['display_name'] ??
-              'Estudiante USC',
-          idAyudante:
-              ayudanteData['nombre'] ??
-              ayudanteData['display_name'] ??
-              'Estudiante USC',
+          favor.idAutor: favor.nombreAutor,
+          idAyudante: nombreAyudante,
         },
         'soloLectura': false,
         'ultimoMensaje': 'Favor aceptado. Coordinen la entrega aquí.',
@@ -171,81 +166,111 @@ class FavorService {
     });
   }
 
-  /// Prepara el acceso al chat existente sin borrar conversaciones antiguas.
-  Future<void> prepararChatFavor(
+  Future<void> cancelarAceptacion({
+    required String favorId,
+    required String idAyudante,
+  }) async {
+    _verificarSesion(idAyudante);
+    final referencia = _favoresRef.doc(favorId);
+    final salas = await _salasFavor(favorId, idAyudante);
+
+    await _firestore.runTransaction((tx) async {
+      final snapshot = await tx.get(referencia);
+      if (!snapshot.exists) throw Exception('El favor ya no está disponible.');
+      final datos = snapshot.data() as Map<String, dynamic>;
+      final favor = FavorModel.fromMap(datos, favorId);
+      if (!favor.puedeCancelarAceptacion(idAyudante)) {
+        throw Exception(
+          'Solo quien aceptó el favor puede cancelar la aceptación.',
+        );
+      }
+      final salaActual = datos['idChat'] as String?;
+      if (salaActual != null && salaActual.isNotEmpty) {
+        final chat = _firestore.collection('chats').doc(salaActual);
+        tx.update(chat, {'soloLectura': true});
+      } else {
+        for (final sala in salas) {
+          final chat = sala.data();
+          final participantes = chat['participantes'] as List? ?? [];
+          if (chat['soloLectura'] != true &&
+              participantes.length == 2 &&
+              participantes.contains(favor.idAutor)) {
+            tx.update(sala.reference, {'soloLectura': true});
+          }
+        }
+      }
+      tx.update(referencia, {
+        'estado': 'Publicado',
+        'idAyudante': null,
+        'nombreAyudante': FieldValue.delete(),
+        'fotoAyudante': FieldValue.delete(),
+        'idChat': FieldValue.delete(),
+        'fechaAceptacion': FieldValue.delete(),
+      });
+    });
+  }
+
+  /// Abre la sala existente y recupera conversaciones de versiones anteriores.
+  Future<String> prepararChatFavor(
     String favorId, {
     required String idUsuario,
   }) async {
     _verificarSesion(idUsuario);
-    final previas = await _firestore
-        .collection('chats')
-        .where('idReferencia', isEqualTo: favorId)
-        .get();
-    final favorRef = _favoresRef.doc(favorId);
-    await _firestore.runTransaction((tx) async {
-      final snapshot = await tx.get(favorRef);
-      if (!snapshot.exists) throw Exception('El favor no existe.');
-      final favor = FavorModel.fromMap(
-        snapshot.data() as Map<String, dynamic>,
-        favorId,
-      );
-      if (!favor.puedeAbrirChat(idUsuario)) {
-        throw Exception(
-          'El chat está disponible únicamente para los dos participantes tras aceptar el favor.',
-        );
+    final snapshot = await _favoresRef.doc(favorId).get();
+    if (!snapshot.exists) throw Exception('El favor no existe.');
+    final datos = snapshot.data() as Map<String, dynamic>;
+    final favor = FavorModel.fromMap(datos, favorId);
+    if (!favor.puedeAbrirChat(idUsuario)) {
+      throw Exception('Solo los participantes pueden abrir el chat del favor.');
+    }
+    final chatGuardado = datos['idChat'] as String?;
+    if (chatGuardado != null && chatGuardado.isNotEmpty) return chatGuardado;
+
+    final salas = await _salasFavor(favorId, idUsuario);
+    for (final sala in salas) {
+      final participantes = sala.data()['participantes'] as List? ?? [];
+      if ((favor.esAceptado && sala.data()['soloLectura'] == true) ||
+          participantes.length != 2 ||
+          !participantes.contains(favor.idAutor) ||
+          !participantes.contains(favor.idAyudante)) {
+        continue;
       }
-      final salaRef = _firestore.collection('chats').doc(chatId(favorId));
-      final sala = await tx.get(salaRef);
-      final autor = await tx.get(_usuariosRef.doc(favor.idAutor));
-      final ayudante = await tx.get(_usuariosRef.doc(favor.idAyudante!));
-      if (!autor.exists || !ayudante.exists) {
-        throw Exception('No se encontraron los perfiles de los participantes.');
+      if (favor.esEntregado && sala.data()['soloLectura'] != true) {
+        await sala.reference.update({'soloLectura': true});
       }
-      final compatibles = previas.docs.where((doc) {
-        final tipo = (doc.data()['tipoReferencia'] as String? ?? '')
-            .toLowerCase();
-        final participantes = doc.data()['participantes'] as List? ?? [];
-        final ids = participantes
-            .map(
-              (p) =>
-                  p is DocumentReference ? p.id : p.toString().split('/').last,
-            )
-            .toSet();
-        return tipo == 'favor' &&
-            ids.length == 2 &&
-            ids.contains(favor.idAutor) &&
-            ids.contains(favor.idAyudante);
-      }).toList();
-      if (!sala.exists && compatibles.isEmpty) {
-        tx.set(salaRef, {
-          'idReferencia': favorId,
-          'tipoReferencia': 'favor',
-          'tituloReferencia': favor.titulo,
-          'participantes': [favor.idAutor, favor.idAyudante],
-          'nombresParticipantes': {
-            favor.idAutor:
-                (autor.data() as Map)['nombre'] ??
-                (autor.data() as Map)['display_name'] ??
-                'Estudiante USC',
-            favor.idAyudante!:
-                (ayudante.data() as Map)['nombre'] ??
-                (ayudante.data() as Map)['display_name'] ??
-                'Estudiante USC',
-          },
-          'soloLectura': favor.esEntregado,
-          'ultimoMensaje': '',
-          'fechaUltimoMensaje': FieldValue.serverTimestamp(),
-        });
-      } else {
-        if (sala.exists) tx.update(salaRef, {'soloLectura': favor.esEntregado});
-        for (final chat in compatibles) {
-          tx.update(chat.reference, {
-            'soloLectura': favor.esEntregado,
-            'tipoReferencia': 'favor',
-          });
-        }
-      }
+      return sala.id;
+    }
+
+    final salaRef = _firestore.collection('chats').doc(chatId(favorId));
+    await salaRef.set({
+      'idReferencia': favorId,
+      'tipoReferencia': 'favor',
+      'tituloReferencia': favor.titulo,
+      'participantes': [favor.idAutor, favor.idAyudante],
+      'nombresParticipantes': {
+        favor.idAutor: favor.nombreAutor,
+        favor.idAyudante!: favor.nombreAyudante,
+      },
+      'soloLectura': favor.esEntregado,
+      'ultimoMensaje': '',
+      'fechaUltimoMensaje': FieldValue.serverTimestamp(),
     });
+    return salaRef.id;
+  }
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _salasFavor(
+    String favorId,
+    String idUsuario,
+  ) async {
+    final salas = await _firestore
+        .collection('chats')
+        .where('participantes', arrayContains: idUsuario)
+        .get();
+    return salas.docs.where((sala) {
+      final datos = sala.data();
+      return datos['idReferencia'] == favorId &&
+          (datos['tipoReferencia'] as String?)?.toLowerCase() == 'favor';
+    }).toList();
   }
 
   // ==========================================
@@ -259,10 +284,7 @@ class FavorService {
     _verificarSesion(idAyudante);
     final favorRef = _favoresRef.doc(favorId);
     // Incluye salas de versiones anteriores sin perder su historial.
-    final salas = await _firestore
-        .collection('chats')
-        .where('idReferencia', isEqualTo: favorId)
-        .get();
+    final salas = await _salasFavor(favorId, idAyudante);
     await _firestore.runTransaction((tx) async {
       final snapshot = await tx.get(favorRef);
       if (!snapshot.exists) throw Exception('El favor no existe.');
@@ -283,8 +305,6 @@ class FavorService {
       if (!usuario.exists) {
         throw Exception('No se encontró el perfil del ayudante.');
       }
-      final salaRef = _firestore.collection('chats').doc(chatId(favorId));
-      final sala = await tx.get(salaRef);
       tx.update(favorRef, {
         'estado': 'Entregado',
         'soloLectura': true,
@@ -292,13 +312,8 @@ class FavorService {
         'fechaEntrega': FieldValue.serverTimestamp(),
       });
       tx.update(usuarioRef, {'favoresCompletados': FieldValue.increment(1)});
-      if (sala.exists) tx.update(salaRef, {'soloLectura': true});
-      for (final chat in salas.docs) {
-        if ((chat.data()['tipoReferencia'] as String? ?? '').toLowerCase() ==
-                'favor' &&
-            chat.id != salaRef.id) {
-          tx.update(chat.reference, {'soloLectura': true});
-        }
+      for (final chat in salas) {
+        tx.update(chat.reference, {'soloLectura': true});
       }
     });
   }
@@ -306,7 +321,7 @@ class FavorService {
   // ==========================================
   // RF09: SISTEMA DE CALIFICACIÓN Y REPORTES
   // ==========================================
-  /// Registra una calificación (1 a 5 estrellas) y recalcula el promedio del usuario calificado
+  /// Registra una calificación. El perfil calcula el promedio desde estas notas.
   Future<void> calificarUsuario({
     required String favorId,
     required String idAutorCalificador,
@@ -333,18 +348,12 @@ class FavorService {
     if (anteriores.docs.isNotEmpty) {
       throw Exception('Ya calificaste este favor.');
     }
-    final historial = await _calificacionesRef
-        .where('idDestinatario', isEqualTo: idDestinatario)
-        .limit(1)
-        .get();
     final calificacionRef = _calificacionesRef.doc(
       calificacionId(favorId, idAutorCalificador),
     );
-    final destinatarioRef = _usuariosRef.doc(idDestinatario);
     await _firestore.runTransaction((tx) async {
       final favorSnap = await tx.get(_favoresRef.doc(favorId));
       final existente = await tx.get(calificacionRef);
-      final usuarioSnap = await tx.get(destinatarioRef);
       if (!favorSnap.exists) throw Exception('El favor no existe.');
       final favor = FavorModel.fromMap(
         favorSnap.data() as Map<String, dynamic>,
@@ -367,28 +376,6 @@ class FavorService {
       if (favor.calificadoPor.contains(idAutorCalificador)) {
         throw Exception('Ya calificaste este favor.');
       }
-      if (!usuarioSnap.exists) {
-        throw Exception('No se encontró el perfil del destinatario.');
-      }
-      final usuario = usuarioSnap.data() as Map<String, dynamic>;
-      final cantidad = usuario['cantidadCalificaciones'];
-      final suma = usuario['sumaEstrellas'];
-      if ((cantidad == null) != (suma == null) ||
-          (cantidad != null && cantidad is! int) ||
-          (suma != null && suma is! int)) {
-        throw Exception('Los contadores de calificación requieren revisión.');
-      }
-      if ((cantidad == null || suma == null) && historial.docs.isNotEmpty) {
-        throw Exception(
-          'El historial anterior requiere preparar sus contadores antes de recibir nuevas calificaciones.',
-        );
-      }
-      final conteo = (cantidad as num?)?.toInt() ?? 0;
-      final acumulado = (suma as num?)?.toInt() ?? 0;
-      if (conteo < 0 || acumulado < conteo || acumulado > conteo * 5) {
-        throw Exception('Los contadores de calificación requieren revisión.');
-      }
-      final promedio = (acumulado + estrellas) / (conteo + 1);
       final calificacion = CalificacionModel(
         id: calificacionRef.id,
         idFavor: favorId,
@@ -401,18 +388,6 @@ class FavorService {
       tx.set(calificacionRef, {
         ...calificacion.toMap(),
         'fechaCreacion': FieldValue.serverTimestamp(),
-      });
-      tx.update(destinatarioRef, {
-        'sumaEstrellas': acumulado + estrellas,
-        'cantidadCalificaciones': conteo + 1,
-        'promedio': promedio,
-        'promedioCalificacion': promedio,
-      });
-      final calificados = List<String>.from(
-        (favorSnap.data() as Map<String, dynamic>)['calificadoPor'] ?? [],
-      );
-      tx.update(_favoresRef.doc(favorId), {
-        'calificadoPor': [...calificados, idAutorCalificador],
       });
     });
   }
@@ -496,6 +471,25 @@ class FavorService {
   /// Retira del feed conservando el registro y su historial en Firestore.
   Future<void> retirarFavor(String favorId, {required String idAutor}) =>
       _gestionarPublicado(favorId, idAutor: idAutor, retirar: true);
+
+  Future<void> eliminarFavor(String favorId, {required String idAutor}) async {
+    _verificarSesion(idAutor);
+    final documento = _favoresRef.doc(favorId);
+    await _firestore.runTransaction((tx) async {
+      final snapshot = await tx.get(documento);
+      if (!snapshot.exists) return;
+      final favor = FavorModel.fromMap(
+        snapshot.data() as Map<String, dynamic>,
+        snapshot.id,
+      );
+      if (!favor.puedeEliminar(idAutor)) {
+        throw Exception(
+          'Solo puedes borrar tus favores publicados o retirados.',
+        );
+      }
+      tx.delete(documento);
+    });
+  }
 
   Future<void> _gestionarPublicado(
     String favorId, {

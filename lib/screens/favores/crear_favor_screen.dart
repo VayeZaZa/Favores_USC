@@ -9,6 +9,7 @@ import '../../config/app_theme.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
 import '../../utils/favor_validators.dart';
+import '../widgets/campus_picker.dart';
 
 /// Pantalla Crear Favor ajustada 100% a la maqueta visual (image5.jpeg)
 class CrearFavorScreen extends ConsumerStatefulWidget {
@@ -20,6 +21,7 @@ class CrearFavorScreen extends ConsumerStatefulWidget {
 
 class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _campoPagoKey = GlobalKey();
   final _tituloController = TextEditingController();
   final _descripcionController = TextEditingController();
   final _pagoController = TextEditingController(text: '1000');
@@ -40,6 +42,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
   }
 
   Future<void> _seleccionarImagen() async {
+    if (_isLoading) return;
     if (_imagenesSeleccionadas.length >= AppConstants.maxFotosFavor) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -85,7 +88,21 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
     });
   }
 
+  void _confirmarUbicacion(String ubicacion) {
+    setState(() => _ubicacionSeleccionada = ubicacion);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final campoPago = _campoPagoKey.currentContext;
+      if (!mounted || campoPago == null) return;
+      Scrollable.ensureVisible(
+        campoPago,
+        duration: const Duration(milliseconds: 230),
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+    });
+  }
+
   Future<void> _publicarFavor() async {
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     if (_ubicacionSeleccionada == null) {
@@ -118,11 +135,16 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
         descripcion: _descripcionController.text.trim(),
         ubicacion: _ubicacionSeleccionada!,
         pago: pago,
-        imagenesLocales: _imagenesSeleccionadas,
+        imagenesLocales: List.of(_imagenesSeleccionadas),
       );
 
       if (mounted) {
-        ref.read(favoresFeedProvider.notifier).cargarInicial();
+        final feed = ref.read(favoresFeedProvider.notifier);
+        if (ref.read(favoresFeedProvider).filtroTipo == 'Todos') {
+          feed.cargarInicial();
+        } else {
+          feed.cambiarFiltro('Todos');
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -220,7 +242,12 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
               TextFormField(
                 controller: _tituloController,
                 decoration: InputDecoration(
-                  hintText: 'Ej: Apuntes de Cálculo II',
+                  hintText: switch (_tipoSeleccionado) {
+                    'Objeto' => 'Ej: ¿Me prestas una calculadora?',
+                    'Domicilio' =>
+                      'Ej: Recoger un pedido en la plazoleta de comidas',
+                    _ => 'Ej: Apuntes de Cálculo II',
+                  },
                   hintStyle: TextStyle(
                     color: Colors.grey.shade400,
                     fontSize: 14,
@@ -287,7 +314,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
+              Wrap(
                 children: [
                   for (int i = 0; i < 3; i++) ...[
                     if (i < _imagenesSeleccionadas.length)
@@ -369,34 +396,9 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: _ubicacionSeleccionada,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(
-                          Icons.location_on,
-                          color: AppTheme.primaryColor,
-                        ),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      hint: const Text('Selecciona punto de encuentro USC'),
-                      validator: FavorValidators.ubicacion,
-                      items: AppConstants.puntosCampus.map((punto) {
-                        return DropdownMenuItem(
-                          value: punto,
-                          child: Text(
-                            punto,
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) =>
-                          setState(() => _ubicacionSeleccionada = val),
+                    CampusPicker(
+                      punto: _ubicacionSeleccionada,
+                      onChanged: _confirmarUbicacion,
                     ),
                   ],
                 ),
@@ -405,6 +407,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
 
               // 5. Valor Ofrecido (COP) (RF03)
               TextFormField(
+                key: _campoPagoKey,
                 controller: _pagoController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
@@ -436,16 +439,31 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                          'Publicar Favor',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: _isLoading
+                        ? const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Publicando favor…'),
+                            ],
+                          )
+                        : const Text(
+                            'Publicar Favor',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
+                  ),
                 ),
               ),
             ],
