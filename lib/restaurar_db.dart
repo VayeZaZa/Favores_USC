@@ -21,7 +21,7 @@ void main() async {
     'semestre': 6,
     'verificado': true,
     'intentosFallidos': 0,
-    'promedio': 5.0,
+    'promedio': 0.0,
     'favoresCompletados': 0,
     'favoresPedidos': 0,
     'objetosDevueltos': 0,

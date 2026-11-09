@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/favor_model.dart';
 import '../services/cloudinary_service.dart';
 import '../services/favor_service.dart';
+import '../services/perfil_service.dart';
 import '../utils/favor_load_failure.dart';
 
 final favorSesionUsuarioProvider = StreamProvider.autoDispose<User?>((ref) {
@@ -17,13 +18,13 @@ final cloudinaryServiceProvider = Provider<CloudinaryService>((ref) {
 });
 
 /// Solo lee los datos del propio usuario para el encabezado del feed.
+final perfilServiceProvider = Provider<PerfilService>((ref) {
+  return PerfilService();
+});
+
 final resumenFavoresUsuarioProvider = StreamProvider.autoDispose
     .family<Map<String, dynamic>?, String>((ref, usuarioId) {
-      return FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(usuarioId)
-          .snapshots()
-          .map((doc) => doc.data());
+      return ref.watch(perfilServiceProvider).observarPerfil(usuarioId);
     });
 
 /// Provider del servicio principal de Favores

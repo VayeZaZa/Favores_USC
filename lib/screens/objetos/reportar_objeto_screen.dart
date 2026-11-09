@@ -151,7 +151,7 @@ class _ReportarObjetoScreenState extends ConsumerState<ReportarObjetoScreen> {
     final esEncontrado = _tipoSeleccionado == 'encontrado';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,

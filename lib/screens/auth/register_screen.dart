@@ -15,8 +15,8 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  static const _navy = Color(0xFF344B73);
-  static const _blue = Color(0xFF7D96BE);
+  static const _navy = Color(0xFF0D1534);
+  static const _blue = Color(0xFF28365F);
   static const _mutedBlue = Color(0xFF7A8BA9);
   static const _borderBlue = Color(0xFFDEE5F0);
 
@@ -63,7 +63,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      await _authService.registrarUsuario(
+      final correoEnviado = await _authService.registrarUsuario(
         nombre: _nombreController.text,
         correo: _correoController.text,
         password: _passwordController.text,
@@ -73,6 +73,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (!mounted) return;
+      final requiereVerificacion = !AuthService.estaExentoDeVerificacion(
+        _correoController.text,
+      );
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -82,11 +85,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
             color: AppTheme.successColor,
             size: 48,
           ),
-          title: const Text('¡Registro Exitoso!'),
+          title: Text(
+            !requiereVerificacion
+                ? 'Cuenta del equipo lista'
+                : correoEnviado
+                ? '¡Revisa tu correo!'
+                : 'Cuenta creada; falta verificar',
+          ),
           content: Text(
-            'Solicitamos un enlace de verificación para ${_correoController.text.trim()}.\n\n'
-            'Revisa Recibidos, Spam y Promociones. Si no llega, intenta iniciar sesión '
-            'con tu contraseña y usa “Reenviar verificación”.',
+            !requiereVerificacion
+                ? 'Tu cuenta del equipo está lista. Ya puedes iniciar sesión.'
+                : correoEnviado
+                ? 'Enviamos un enlace a ${_correoController.text.trim()}. Confirma el correo y luego vuelve a la app para iniciar sesión.'
+                : 'La cuenta quedó creada, pero Firebase no confirmó el envío del enlace. Inicia sesión con tu contraseña y pulsa “Reenviar verificación”. Revisa también Spam y Promociones.',
             style: const TextStyle(fontSize: 14),
           ),
           actions: [
@@ -112,7 +123,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F7),
+      backgroundColor: AppTheme.surfaceColor,
       bottomNavigationBar: const _RegisterFooter(),
       body: SafeArea(
         bottom: false,
@@ -141,8 +152,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           const Spacer(),
                           const FavoresBrand(
                             foregroundColor: _navy,
-                            accentColor: _blue,
-                            surfaceColor: Color(0xFFEAF0FA),
+                            accentColor: AppTheme.accentColor,
+                            surfaceColor: Color(0xFFFFF2CC),
                           ),
                         ],
                       ),
@@ -182,7 +193,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             child: Container(
                               width: 116,
                               height: 142,
-                              color: const Color(0xFFFFF1F1),
+                              color: const Color(0xFFFFF2CC),
                               child: Image.asset(
                                 'assets/images/icon para registro.png',
                                 fit: BoxFit.contain,
@@ -293,8 +304,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 const SizedBox(height: 9),
                               ],
                               TextFormField(
+                                controller: _correoController,
+                                keyboardType: TextInputType.emailAddress,
+                                autofillHints: const [AutofillHints.email],
+                                validator: Validators.validateEmail,
+                                decoration: const InputDecoration(
+                                  labelText: 'Correo institucional',
+                                  hintText: 'tu.correo@usc.edu.co',
+                                  helperText: 'Usa tu cuenta de la USC',
+                                  helperMaxLines: 1,
+                                  prefixIcon: Icon(
+                                    Icons.mail_outline_rounded,
+                                    size: 19,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 9),
+                              TextFormField(
                                 controller: _nombreController,
                                 textCapitalization: TextCapitalization.words,
+                                textInputAction: TextInputAction.next,
                                 validator: (value) =>
                                     Validators.validateRequired(
                                       value,
@@ -302,21 +331,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     ),
                                 decoration: const InputDecoration(
                                   labelText: 'Nombre completo',
+                                  hintText: '¿Cómo te llamas?',
+                                  helperText: 'Así te verá la comunidad',
+                                  helperMaxLines: 1,
                                   prefixIcon: Icon(
                                     Icons.person_outline_rounded,
-                                    size: 19,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 9),
-                              TextFormField(
-                                controller: _correoController,
-                                keyboardType: TextInputType.emailAddress,
-                                validator: Validators.validateEmail,
-                                decoration: const InputDecoration(
-                                  labelText: 'Correo institucional',
-                                  prefixIcon: Icon(
-                                    Icons.mail_outline_rounded,
                                     size: 19,
                                   ),
                                 ),
@@ -427,8 +446,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       ? null
                                       : _handleRegister,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: _blue,
-                                    foregroundColor: Colors.white,
+                                    backgroundColor: AppTheme.accentColor,
+                                    foregroundColor: _navy,
                                     shape: const StadiumBorder(),
                                     textStyle: const TextStyle(
                                       fontWeight: FontWeight.w700,
@@ -491,18 +510,10 @@ class _RegisterFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xFFFFF8F7),
+      color: AppTheme.surfaceColor,
       child: SafeArea(
         top: false,
-        child: SizedBox(
-          height: 112,
-          width: double.infinity,
-          child: Image.asset(
-            'assets/images/footer registro.png',
-            fit: BoxFit.cover,
-            alignment: Alignment.bottomCenter,
-          ),
-        ),
+        child: const SizedBox(height: 12),
       ),
     );
   }

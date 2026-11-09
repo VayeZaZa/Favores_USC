@@ -3,14 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Tema visual azul para FAVORES USC.
 class AppTheme {
-  static const Color primaryColor = Color(0xFF1265D8);
-  static const Color primaryDark = Color(0xFF0847A8);
-  static const Color primaryLight = Color(0xFF3B8BFA);
-  static const Color accentColor = Color(0xFF27C6D1);
-  static const Color surfaceColor = Color(0xFFF4F8FF);
+  static const Color primaryColor = Color(0xFF111B43);
+  static const Color primaryDark = Color(0xFF0D1534);
+  static const Color primaryLight = Color(0xFF28365F);
+  static const Color accentColor = Color(0xFFFFD981);
+  static const Color surfaceColor = Color(0xFFF5F7FA);
   static const Color cardColor = Colors.white;
   static const Color textPrimary = Color(0xFF1E1E1E);
-  static const Color textSecondary = Color(0xFF6C757D);
+  static const Color textSecondary = Color(0xFF64748B);
   static const Color errorColor = Color(0xFFDC3545);
   static const Color successColor = Color(0xFF28A745);
   static const Color warningColor = Color(0xFFFFC107);

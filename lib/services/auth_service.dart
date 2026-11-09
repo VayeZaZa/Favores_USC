@@ -13,14 +13,23 @@ class AuthService {
   CollectionReference<Map<String, dynamic>> get _usuariosRef =>
       _firestore.collection('usuarios');
 
-  /// Bandera de desarrollo: cambiar a false en producción para exigir correo verificado (RF01, RF02)
-  static const bool bypassEmailVerificationDev = true;
+  /// Cuentas del equipo que pueden entrar sin confirmar el correo.
+  /// Las reglas de Firestore deben mantener la misma lista.
+  static const Set<String> correosExentosVerificacion = {
+    'alex@usc.edu.co',
+    'valeria@usc.edu.co',
+    'david@usc.edu.co',
+  };
+
+  static bool estaExentoDeVerificacion(String correo) =>
+      correosExentosVerificacion.contains(correo.trim().toLowerCase());
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  /// RF01: Registro de usuario institucional (Guarda exclusivamente en 'usuarios')
-  Future<void> registrarUsuario({
+  /// RF01: Crea el perfil y envía el correo si la cuenta requiere verificación.
+  /// Retorna true únicamente cuando Firebase acepta el envío del enlace.
+  Future<bool> registrarUsuario({
     required String nombre,
     required String correo,
     required String password,
@@ -45,14 +54,10 @@ class AuthService {
       throw Exception('No se pudo crear la cuenta de usuario');
     }
 
-    // 3. Enviar enlace de verificación al correo institucional (RF01)
-    try {
-      await user.sendEmailVerification();
-    } catch (e) {
-      // Ignorar error de envío en dev si no llega a tiempo
-    }
+    final estaExento = estaExentoDeVerificacion(correo);
 
-    // 4. Guardar datos de perfil en Firestore en la colección 'usuarios' (igual que David)
+    // 3. Guardar el perfil para que el usuario pueda solicitar otro enlace
+    // desde el inicio de sesión si Firebase falla al enviar el primero.
     final nuevoUsuario = UsuarioModel(
       uid: user.uid,
       nombre: nombre.trim(),
@@ -60,9 +65,9 @@ class AuthService {
       programa: programa,
       semestre: semestre,
       telefono: telefono.trim(),
-      verificado: bypassEmailVerificationDev,
+      verificado: estaExento,
       intentosFallidos: 0,
-      promedio: 5.0,
+      promedio: 0.0,
       favoresCompletados: 0,
       favoresDevueltos: 0,
       favoresPedidos: 0,
@@ -71,6 +76,18 @@ class AuthService {
     );
 
     await _usuariosRef.doc(user.uid).set(nuevoUsuario.toMap());
+
+    // Las tres cuentas del equipo están exentas de verificación.
+    if (estaExento) return false;
+
+    // No informar éxito de envío si Firebase rechazó la solicitud.
+    try {
+      await user.sendEmailVerification();
+      return true;
+    } catch (_) {
+      // El perfil ya existe; se puede reenviar desde la pantalla de acceso.
+      return false;
+    }
   }
 
   /// RF02: Inicio de sesión con correo y contraseña
@@ -113,13 +130,13 @@ class AuthService {
         );
       }
 
-      // 5. Comprobar estado de verificación (o omitir si estamos en modo desarrollo)
+      // 5. Comprobar el estado actualizado de verificación o la excepción del equipo.
       await user.reload();
-      final esVerificado = bypassEmailVerificationDev
-          ? true
-          : (_auth.currentUser?.emailVerified ?? false);
+      await user.getIdToken(true);
+      final esVerificado = (_auth.currentUser?.emailVerified ?? false) ||
+          estaExentoDeVerificacion(emailClean);
 
-      // Si es verificado (o modo dev), actualizar Firestore si estaba en false
+      // Si está verificado o exento, actualizar el perfil si estaba en false.
       if (esVerificado && !usuarioActual.verificado) {
         await _usuariosRef.doc(user.uid).update({'verificado': true});
         usuarioActual = usuarioActual.copyWith(verificado: true);

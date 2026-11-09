@@ -31,7 +31,7 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
     final miUid = user?.uid ?? '';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,

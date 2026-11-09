@@ -345,7 +345,7 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
     final favorAsync = ref.watch(favorDetailStreamProvider(widget.favorId));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,

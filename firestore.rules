@@ -7,11 +7,25 @@ rules_version = '2';
 // chats/{id}/mensajes/{id}: dos participantes inmutables, vinculados a un caso.
 // calificaciones/{favorId_uid}: una evaluación por participante tras la entrega.
 // reportes/{id}: solo quien presenta un reporte puede leerlo.
-// El campo verificado del perfil NO concede permisos. No se exige email_verified.
+// El campo verificado del perfil no concede permisos. Las funciones de la app
+// exigen email_verified, salvo las tres cuentas de desarrollo listadas abajo.
 service cloud.firestore {
   match /databases/{database}/documents {
-    function autenticado() { return request.auth != null; }
-    function esPropietario(uid) { return autenticado() && request.auth.uid == uid; }
+    function sesionIniciada() { return request.auth != null; }
+    function cuentaVerificadaOExenta() {
+      return sesionIniciada() && (
+        request.auth.token.get('email_verified', false) == true ||
+        request.auth.token.get('email', '') in [
+          'alex@usc.edu.co',
+          'valeria@usc.edu.co',
+          'david@usc.edu.co'
+        ]
+      );
+    }
+    function autenticado() { return cuentaVerificadaOExenta(); }
+    // Permite leer/crear el propio perfil antes de verificar el correo.
+    // Las demás colecciones siguen exigiendo cuentaVerificadaOExenta().
+    function esPropietario(uid) { return sesionIniciada() && request.auth.uid == uid; }
     function esAutor(valor) {
       return autenticado() && (valor == request.auth.uid ||
         valor == /databases/$(database)/documents/usuarios/$(request.auth.uid));
@@ -54,9 +68,9 @@ service cloud.firestore {
         imagen(d.get('fotoPerfil', '')) && insignias(d.get('insignias', [])) &&
         contador(d.get('favoresCompletados', 0)) && contador(d.get('favoresDevueltos', 0)) &&
         contador(d.get('favoresPedidos', 0)) && contador(d.get('objetosDevueltos', 0)) &&
-        d.get('promedio', 5) is number && d.get('promedio', 5) >= 0 && d.get('promedio', 5) <= 5 &&
-        d.get('promedioCalificacion', 5) is number &&
-        d.get('promedioCalificacion', 5) >= 0 && d.get('promedioCalificacion', 5) <= 5;
+        d.get('promedio', 0) is number && d.get('promedio', 0) >= 0 && d.get('promedio', 0) <= 5 &&
+        d.get('promedioCalificacion', 0) is number &&
+        d.get('promedioCalificacion', 0) >= 0 && d.get('promedioCalificacion', 0) <= 5;
     }
     match /usuarios/{uid} {
       allow read: if esPropietario(uid);

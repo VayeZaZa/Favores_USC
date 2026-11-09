@@ -267,7 +267,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     Expanded(
                       child: _estadistica(
                         Icons.star_rounded,
-                        promedio == 0 ? '—' : promedio.toStringAsFixed(1),
+                        promedio.toStringAsFixed(1),
                         'Promedio',
                       ),
                     ),

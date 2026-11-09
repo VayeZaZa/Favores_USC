@@ -64,13 +64,19 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
         );
       });
     }
-    final nombreUsuario =
-        currentUser?.displayName ??
-        currentUser?.email?.split('@').first ??
-        'Estudiante';
+    final nombrePerfil =
+        (resumen?['nombre'] ?? resumen?['display_name'])?.toString().trim();
+    final nombreAuth = currentUser?.displayName?.trim();
+    final nombreCompleto = nombrePerfil != null && nombrePerfil.isNotEmpty
+        ? nombrePerfil
+        : nombreAuth != null && nombreAuth.isNotEmpty && !nombreAuth.contains('@')
+        ? nombreAuth
+        : 'Estudiante';
+    // El encabezado usa solo el primer nombre para que no se corte en móviles.
+    final nombreUsuario = nombreCompleto.split(RegExp(r'\s+')).first;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -199,7 +205,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF0D47A1), Color(0xFFE6A100)],
+                  colors: [Color(0xFF111B43), Color(0xFF28365F)],
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                 ),
@@ -245,15 +251,11 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              (resumen?['cantidadCalificaciones'] as num? ??
-                                          0) >
-                                      0
-                                  ? ((resumen?['promedioCalificacion'] ??
-                                                    resumen?['promedio'])
-                                                as num?)
-                                            ?.toStringAsFixed(1) ??
-                                        '—'
-                                  : '—',
+                              ((resumen?['promedioCalificacion'] ??
+                                          resumen?['promedio'])
+                                      as num?)
+                                  ?.toStringAsFixed(1) ??
+                              '0.0',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 24,

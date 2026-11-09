@@ -24,11 +24,13 @@ class PerfilService {
     // El promedio se calcula sin permitir que otra persona edite este perfil.
     return Stream.multi((eventos) {
       Map<String, dynamic>? perfil;
-      double? promedio;
+      double promedio = 0.0;
       void publicar() {
         final datos = perfil;
         eventos.add(
-          datos == null ? null : {...datos, 'promedioCalificacion': ?promedio},
+          datos == null
+              ? null
+              : {...datos, 'promedioCalificacion': promedio},
         );
       }
 
@@ -47,7 +49,7 @@ class PerfilService {
                   suma + ((doc.data()['estrellas'] as num?)?.toDouble() ?? 0),
             );
             promedio = snapshot.docs.isEmpty
-                ? null
+                ? 0.0
                 : total / snapshot.docs.length;
             publicar();
           }, onError: eventos.addError);

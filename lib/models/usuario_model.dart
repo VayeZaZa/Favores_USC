@@ -16,7 +16,7 @@ class UsuarioModel {
   final int favoresDevueltos;
   final int favoresPedidos;
   final int objetosDevueltos; // RF14, RF15
-  final double promedio; // RF09, RF15: calificación promedio (1.0 a 5.0)
+  final double promedio; // RF09, RF15: promedio de calificaciones (0.0 a 5.0)
   final List<String> insignias; // RF14: lista de insignias obtenidas
 
   UsuarioModel({
@@ -34,7 +34,7 @@ class UsuarioModel {
     this.favoresDevueltos = 0,
     this.favoresPedidos = 0,
     this.objetosDevueltos = 0,
-    this.promedio = 5.0,
+    this.promedio = 0.0,
     this.insignias = const ['novato_solidario'],
   });
 
@@ -110,7 +110,7 @@ class UsuarioModel {
       objetosDevueltos: (map['objetosDevueltos'] as num?)?.toInt() ?? 0,
       promedio: (map['promedioCalificacion'] as num?)?.toDouble()
           ?? (map['promedio'] as num?)?.toDouble()
-          ?? 5.0,
+          ?? 0.0,
       insignias: insignias,
     );
   }
