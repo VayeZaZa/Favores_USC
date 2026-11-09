@@ -1,55 +1,54 @@
-# Validación de objetos y chat
+# Validación de objetos, chat y avisos
 
-Cambios locales para RF07, RF12 y RF13. Sin despliegue de reglas ni cambios remotos.
+| Requisito | Verificado localmente | Validación pendiente en dispositivo |
+| --- | --- | --- |
+| RF07 | Firestore Emulator permite el chat del favor aceptado, bloquea a terceros y deja el historial disponible al entregar. Flutter cubre permisos y reintentos. | Intercambiar texto y fotos entre dos cuentas reales y verificar el cierre de ambos tipos de sala. |
+| RF10 | Flutter y Firestore Emulator cubren foto opcional en Perdido, obligatoria en Encontrado, colores y persistencia de URL. | Tomar o seleccionar una foto real y confirmar que Cloudinary la recibe y se puede abrir en otro teléfono. |
+| RF11 | Reclamo, sala y mensaje de prueba se guardan juntos. El mensaje con evidencia solo se lee desde la sala. La lógica del aviso se probó con FCM simulado. | Activar notificaciones y verificar el aviso en un teléfono, con app en primer plano y en segundo plano. |
+| RF12 | Firestore Emulator cubre confirmación, reapertura, entrega y bloqueo de la sala anterior; Flutter cubre diálogos y ampliación de foto. | Recorrer el flujo completo desde las pantallas móviles con dos cuentas. |
+| RF13 | Dos decisiones simultáneas sobre el mismo reporte en el emulador dejan un solo ganador. Las reglas rechazan saltos, terceros y escritura desde una sala anterior. | Repetir el escenario desde dos sesiones de la app si se requiere evidencia del cliente móvil. |
+| RN03 | Listas con construcción bajo demanda y miniaturas de tamaño acotado en memoria. | Medir fluidez, memoria y tiempo de carga en un Android y un iPhone de gama media. |
+| RN06 | Barra compartida con Inicio, Favores, Objetos y Perfil; prueba de navegación en ancho de 360 px. | Comprobar con texto grande, teclado abierto y navegación en teléfonos reales. |
 
-## Comprobaciones automáticas
+## Reproducir las pruebas
 
-Con Flutter instalado, ejecutar desde la raíz del proyecto:
+Desde el repositorio, con Flutter, Java 21, Node 22 y Firebase CLI:
 
 ```sh
 flutter pub get
-flutter analyze
-flutter test test/chat_access_test.dart
 flutter test
+npm --prefix functions ci
+npm --prefix functions test
+firebase emulators:exec --only firestore --project demo-favores-tests "npm --prefix functions run test:rules"
 ```
 
-Las pruebas de permisos cubren los estados de favores y objetos, participantes externos,
-reclamos anteriores, cierre, autorización del dueño y retrocesos permitidos.
-No sustituyen las pruebas de integración de las transacciones ni las reglas de Firestore.
+Las pruebas de reglas usan exclusivamente el proyecto ficticio demo-favores-tests
+y un servidor local. La prueba Flutter de integración con dispositivo que ya
+existía se explica en [RF13_pruebas.md](RF13_pruebas.md). La suite general tiene
+dos pruebas previas ajenas a esta entrega: serialización de perfil y navegación
+de bienvenida. Las pruebas de RF11 no envían notificaciones reales.
 
-## Validación con dos cuentas y una tercera cuenta externa
+## Activar el aviso en un entorno Firebase de prueba
 
-1. A publica un favor y B lo acepta. La aceptación y la creación de sala deben
-   guardarse juntas. El chat se abre para B y el botón Chat funciona para A.
-2. A y B intercambian texto y fotografías. C no puede acceder como participante.
-3. B confirma el pago. Ambos conservan el historial sin poder escribir.
-   Si el favor cambia a Cancelado por el flujo correspondiente, también se bloquea
-   la escritura al consultar el estado de la publicación.
-4. A publica un objeto perdido. B adjunta prueba. El objeto queda Pendiente y
-   ambos pueden abrir la sala desde Objetos para ver la evidencia, sin escribir.
-5. A confirma la prueba desde el menú del chat. La escritura se habilita en ambos.
-   B y C no pueden confirmar, rechazar ni marcar la entrega.
-6. A rechaza la prueba o cancela la entrega: el reporte vuelve a Publicado,
-   se limpia el reclamante y la sala anterior queda bloqueada. Un nuevo reclamo
-   debe crear otra sala y no habilitar la anterior.
-7. A marca Entregado. Objeto y sala se cierran juntos. No se puede reabrir el caso.
-8. Dos cuentas reclaman simultáneamente: una sola transacción debe ganar y
-   guardar tanto el reclamo como la sala y el mensaje de prueba.
+1. Usar un proyecto de prueba autorizado con Authentication, Firestore,
+   Cloud Functions y FCM. Configurar la app para ese proyecto y usar cuentas de
+   prueba. El envío ocurre en la función notificarReclamoObjeto después de la
+   creación del mensaje privado de evidencia.
+2. Revisar diferencias con las reglas e índices desplegados antes de publicar.
+   Las reglas parten de la versión de desarrollo y requieren casos con chatId
+   vinculado para escribir en el chat. Las conversaciones antiguas se pueden
+   leer si son de los participantes. Revisar cómo migrar casos antiguos activos
+   sin chatId y retirar las URL de evidencia antiguas que quedaron en reportes.
+3. Confirmar que la región de la función corresponde a la ubicación de Firestore.
+   Publicar en el proyecto de prueba las reglas, índices y la función; esperar
+   a que el índice de Objetos esté listo. Para iOS, habilitar Push Notifications
+   en el equipo de firma y configurar APNs en Firebase. No incluir claves en Git.
+4. Iniciar sesión como dueño en un dispositivo y activar avisos desde Perfil.
+   El perfil conserva un token de dispositivo activo. Con otra cuenta, reportar
+   la coincidencia y adjuntar una foto; el dueño recibe un aviso genérico.
+   Abrir Objetos y comprobar que solo los dos participantes pueden ver la prueba.
+5. Concluir con la matriz de la tabla. Para RN03, usar una compilación de perfil,
+   registrar dispositivo/OS y medir el desplazamiento por listados, apertura de
+   fotos y zoom con Flutter DevTools. Para RN06, repetir en las cuatro pestañas.
 
-## Estado de la verificación
-
-Se preparó Flutter 3.47.8 / Dart 3.13.7 dentro de work/ para esta revisión.
-Las pruebas de permisos, estados, reintentos, diálogos y ampliación de la evidencia
-se ejecutaron. El análisis estático de los archivos cambiados no tiene incidencias.
-
-La suite general conserva dos fallos en archivos ajenos a estos cambios:
-usuario_model_test.dart espera un campo ausente y widget_test.dart busca el botón
-Siguiente que la bienvenida actual no presenta. No se modificaron esos módulos.
-
-La contención real de Firestore todavía requiere ejecutar la prueba de integración
-descrita en RF13_pruebas.md. No se ha probado la app completa en un dispositivo.
-
-Los controles de sesión y estados incluidos se ejecutan en el cliente.
-La autorización frente a clientes modificados requiere reglas de Firestore
-compatibles y sus pruebas en emulador. Esta copia de main no contiene esas reglas;
-no se modificó la configuración desplegada en Firebase.
+No se han publicado reglas, índices ni funciones en Firebase de producción.

@@ -744,6 +744,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       borderRadius: BorderRadius.circular(12),
                       child: CachedNetworkImage(
                         imageUrl: mensaje.urlFoto!,
+                        memCacheWidth: 600,
                         width: 200,
                         fit: BoxFit.cover,
                       ),

@@ -1,0 +1,12 @@
+{
+  "name": "favores-usc-functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {"node": "22"},
+  "scripts": {
+    "test": "node --test reclamo.test.js",
+    "test:rules": "node --test firestore.rules.test.js"
+  },
+  "dependencies": {"firebase-admin": "^13.5.0", "firebase-functions": "^6.5.0"},
+  "devDependencies": {"@firebase/rules-unit-testing": "^4.0.1", "firebase": "^11.0.0"}
+}

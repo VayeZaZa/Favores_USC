@@ -14,7 +14,9 @@ import '../objetos/articulos_screen.dart';
 
 /// Feed Paginado de Favores ajustado 100% al Mockup (image7.png) y especificaciones del documento
 class FavoresFeedScreen extends ConsumerStatefulWidget {
-  const FavoresFeedScreen({super.key});
+  const FavoresFeedScreen({super.key, this.alAbrirObjetos});
+
+  final VoidCallback? alAbrirObjetos;
 
   @override
   ConsumerState<FavoresFeedScreen> createState() => _FavoresFeedScreenState();
@@ -38,6 +40,15 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _abrirObjetos() {
+    final abrir = widget.alAbrirObjetos;
+    if (abrir != null) {
+      abrir();
+    } else {
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ArticulosScreen()));
+    }
   }
 
   @override
@@ -80,10 +91,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
             icon: const Icon(Icons.inventory_2_outlined, color: AppTheme.primaryColor),
             tooltip: 'Artículos Perdidos y Encontrados',
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ArticulosScreen()),
-              );
+              _abrirObjetos();
             },
           ),
         ],
@@ -127,7 +135,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.blue.withOpacity(0.2),
+                    color: Colors.blue.withValues(alpha: 0.2),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -309,10 +317,7 @@ class _FavoresFeedScreenState extends ConsumerState<FavoresFeedScreen> {
       child: InkWell(
         onTap: () {
           if (label == 'Objetos') {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ArticulosScreen()),
-            );
+            _abrirObjetos();
           } else {
             ref.read(favoresFeedProvider.notifier).cambiarFiltro(label);
           }
@@ -369,7 +374,7 @@ class _FavorCardMockup extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -400,7 +405,7 @@ class _FavorCardMockup extends StatelessWidget {
                         errorWidget: (context, url, err) => const Icon(Icons.broken_image),
                       )
                     : Container(
-                        color: AppTheme.primaryColor.withOpacity(0.08),
+                        color: AppTheme.primaryColor.withValues(alpha: 0.08),
                         child: const Icon(
                           Icons.volunteer_activism,
                           size: 48,
@@ -439,7 +444,7 @@ class _FavorCardMockup extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 4,
                       ),
                     ],
@@ -513,7 +518,7 @@ class _FavorCardMockup extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.15),
                       child: const Text(
                         'USC',
                         style: TextStyle(

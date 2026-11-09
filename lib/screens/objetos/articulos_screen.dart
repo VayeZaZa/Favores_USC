@@ -245,7 +245,7 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
           boxShadow: esActivo
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
+                    color: Colors.black.withValues(alpha: 0.06),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -289,7 +289,7 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -307,6 +307,8 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
               child: objeto.urlFoto.isNotEmpty
                   ? CachedNetworkImage(
                       imageUrl: objeto.urlFoto,
+                      memCacheWidth: 264,
+                      memCacheHeight: 264,
                       fit: BoxFit.cover,
                       placeholder: (ctx, url) => Container(
                         color: Colors.grey.shade100,
