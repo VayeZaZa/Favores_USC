@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../config/app_theme.dart';
@@ -32,9 +35,12 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberMe = false;
   String? _errorMessage;
   bool _mostrarReenvioVerificacion = false;
+  Timer? _temporizador;
+  int _segundosRestantes = 0;
 
   @override
   void dispose() {
+    _temporizador?.cancel();
     _correoController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -82,6 +88,15 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleReenviarVerificacion() async {
+    if (_isLoading || _segundosRestantes > 0) return;
+    setState(() {
+      _isLoading = true;
+      _segundosRestantes = 60;
+    });
+    _temporizador = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() => _segundosRestantes--);
+      if (_segundosRestantes == 0) timer.cancel();
+    });
     try {
       await _authService.reenviarEnlaceVerificacion(
         correo: _correoController.text,
@@ -100,10 +115,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al reenviar: $e'),
+          content: Text(e is FirebaseAuthException && e.code == 'too-many-requests'
+              ? 'Firebase ha pausado los envíos. Revisa tu bandeja e inténtalo más tarde.'
+              : 'Error al reenviar: $e'),
           backgroundColor: AppTheme.errorColor,
         ),
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -214,7 +233,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                   _LoginError(
                                     message: _errorMessage!,
                                     showResend: _mostrarReenvioVerificacion,
-                                    onResend: _handleReenviarVerificacion,
+                                    segundos: _segundosRestantes,
+                                    onResend: _isLoading || _segundosRestantes > 0
+                                        ? null : _handleReenviarVerificacion,
                                   ),
                                   const SizedBox(height: 10),
                                 ],
@@ -537,11 +558,13 @@ class _LoginError extends StatelessWidget {
     required this.message,
     required this.showResend,
     required this.onResend,
+    required this.segundos,
   });
 
   final String message;
   final bool showResend;
-  final VoidCallback onResend;
+  final VoidCallback? onResend;
+  final int segundos;
 
   @override
   Widget build(BuildContext context) {
@@ -564,7 +587,7 @@ class _LoginError extends StatelessWidget {
             TextButton.icon(
               onPressed: onResend,
               icon: const Icon(Icons.send_rounded, size: 15),
-              label: const Text('Reenviar verificación'),
+              label: Text(segundos > 0 ? 'Reenviar en ${segundos}s' : 'Reenviar verificación'),
               style: TextButton.styleFrom(
                 foregroundColor: _LoginScreenState._gold,
                 padding: EdgeInsets.zero,
