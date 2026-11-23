@@ -8,6 +8,7 @@ import '../../config/app_theme.dart';
 import '../../models/favor_model.dart';
 import '../../providers/favor_provider.dart';
 import '../../services/auth_service.dart';
+import '../../utils/favor_load_failure.dart';
 import '../chat/chat_room_screen.dart';
 import '../widgets/confirmar_borrado.dart';
 import 'widgets/calificar_favor_sheet.dart';
@@ -692,8 +693,27 @@ class _FavorDetailScreenState extends ConsumerState<FavorDetailScreen> {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, stack) =>
-            Center(child: Text('Error cargando favor: $err')),
+        error: (err, stack) {
+          registrarErrorCargaFavor('detalle', err, stack);
+          final fallo = FavorLoadFailure.from(err);
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(fallo.message, textAlign: TextAlign.center),
+                  TextButton(
+                    onPressed: () => ref.invalidate(
+                      favorDetailStreamProvider(widget.favorId),
+                    ),
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

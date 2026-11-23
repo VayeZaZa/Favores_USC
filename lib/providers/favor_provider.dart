@@ -246,19 +246,37 @@ final seguimientoFavorProvider = Provider.autoDispose
     });
 
 /// StreamProvider para ver los detalles en tiempo real de un favor en particular
-final favorDetailStreamProvider = StreamProvider.family<FavorModel?, String>((
-  ref,
-  favorId,
-) {
-  return FirebaseFirestore.instance
-      .collection('favores')
-      .doc(favorId)
-      .snapshots()
-      .map((snapshot) {
-        if (!snapshot.exists || snapshot.data() == null) return null;
-        return FavorModel.fromMap(snapshot.data()!, snapshot.id);
+final favorDetailStreamProvider = StreamProvider.autoDispose
+    .family<FavorModel?, String>((ref, favorId) async* {
+      final usuario = await ref.watch(favorSesionUsuarioProvider.future);
+      if (usuario == null) {
+        throw FirebaseException(
+          plugin: 'cloud_firestore',
+          code: 'unauthenticated',
+        );
+      }
+
+      final documento = FirebaseFirestore.instance
+          .collection('favores')
+          .doc(favorId);
+      Stream<FavorModel?> observar() => documento.snapshots().map((snapshot) {
+        final datos = snapshot.data();
+        return datos == null ? null : FavorModel.fromMap(datos, snapshot.id);
       });
-});
+
+      try {
+        await for (final favor in observar()) {
+          yield favor;
+        }
+      } on FirebaseException catch (error) {
+        if (error.code != 'permission-denied' ||
+            FirebaseAuth.instance.currentUser?.uid != usuario.uid) {
+          rethrow;
+        }
+        await usuario.getIdToken(true);
+        yield* observar();
+      }
+    });
 
 /// FutureProvider para revisar favores sin aceptar pasadas 24 horas del usuario (RF16)
 final favoresExpiradosProvider =
