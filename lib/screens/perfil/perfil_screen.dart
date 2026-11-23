@@ -29,6 +29,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
   final _imagePicker = ImagePicker();
   bool _subiendoFoto = false;
   bool _cerrandoSesion = false;
+  bool _enviandoEnlace = false;
   Future<List<FavorModel>>? _favoresFuture;
 
   String? get _uid => _authService.currentUser?.uid;
@@ -242,6 +243,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              _seguridadCuenta(),
               const SizedBox(height: 16),
               _tarjeta(
                 titulo: 'Tu recorrido',
@@ -565,6 +568,58 @@ class _PerfilScreenState extends State<PerfilScreen> {
         ],
       ),
     );
+  }
+
+  Widget _seguridadCuenta() {
+    final cuenta = _authService.currentUser;
+    final correo = cuenta?.email ?? '';
+    final estado = cuenta?.emailVerified == true
+        ? 'Verificado'
+        : AuthService.estaExentoDeVerificacion(correo)
+            ? 'Cuenta de demostración'
+            : 'Pendiente de verificar';
+    return _tarjeta(
+      titulo: 'Seguridad de la cuenta',
+      icono: Icons.shield_outlined,
+      child: Column(
+        children: [
+          _dato(Icons.mail_outline, 'Correo', estado),
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: _gold),
+            icon: const Icon(Icons.key_rounded),
+            label: const Text('Restablecer contraseña'),
+            onPressed: correo.isEmpty || _enviandoEnlace
+                ? null
+                : () => _confirmarRecuperacion(correo),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmarRecuperacion(String correo) async {
+    final enviar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restablecer contraseña'),
+        content: Text('Te enviaremos un enlace a $correo.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar enlace')),
+        ],
+      ),
+    );
+    if (!mounted || enviar != true || _enviandoEnlace) return;
+    setState(() => _enviandoEnlace = true);
+    var mensaje = 'Revisa tu correo para cambiar la contraseña.';
+    try {
+      await _authService.enviarEnlaceRecuperacion(correo: correo);
+    } catch (_) {
+      mensaje = 'No se pudo enviar el enlace. Intenta más tarde.';
+    }
+    if (!mounted) return;
+    setState(() => _enviandoEnlace = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
   }
 
   Widget _seccionFavores(String uid) {
