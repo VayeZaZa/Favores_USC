@@ -324,11 +324,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 controller: _nombreController,
                                 textCapitalization: TextCapitalization.words,
                                 textInputAction: TextInputAction.next,
-                                validator: (value) =>
-                                    Validators.validateRequired(
-                                      value,
-                                      'El nombre',
-                                    ),
+                                autofillHints: const [AutofillHints.name],
+                                validator: (value) => (value ?? '').contains('@')
+                                    ? 'Escribe tu nombre aquí. El correo va arriba.'
+                                    : Validators.validateRequired(value, 'El nombre'),
                                 decoration: const InputDecoration(
                                   labelText: 'Nombre completo',
                                   hintText: '¿Cómo te llamas?',
@@ -366,6 +365,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           _obscurePassword = !_obscurePassword,
                                     ),
                                   ),
+                                ),
+                              ),
+                              const SizedBox(height: 9),
+                              TextFormField(
+                                obscureText: _obscurePassword,
+                                autocorrect: false,
+                                enableSuggestions: false,
+                                textInputAction: TextInputAction.next,
+                                validator: (value) =>
+                                    value == null || value.isEmpty
+                                        ? 'Vuelve a escribir tu contraseña.'
+                                        : value != _passwordController.text
+                                            ? 'Las contraseñas deben coincidir.'
+                                            : null,
+                                decoration: const InputDecoration(
+                                  labelText: 'Confirmar contraseña',
+                                  prefixIcon: Icon(Icons.lock_outline_rounded, size: 19),
                                 ),
                               ),
                               const SizedBox(height: 9),
