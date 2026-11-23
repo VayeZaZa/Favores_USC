@@ -12,8 +12,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function sesionIniciada() { return request.auth != null; }
+    function cuentaInstitucional() {
+      return sesionIniciada() &&
+        request.auth.token.get('email', '').lower().matches('^[^@]+@usc[.]edu[.]co$');
+    }
     function cuentaVerificadaOExenta() {
-      return sesionIniciada() && (
+      return cuentaInstitucional() && (
         request.auth.token.get('email_verified', false) == true ||
         request.auth.token.get('email', '') in [
           'alex@usc.edu.co',
@@ -25,7 +29,7 @@ service cloud.firestore {
     function autenticado() { return cuentaVerificadaOExenta(); }
     // Permite leer/crear el propio perfil antes de verificar el correo.
     // Las demás colecciones siguen exigiendo cuentaVerificadaOExenta().
-    function esPropietario(uid) { return sesionIniciada() && request.auth.uid == uid; }
+    function esPropietario(uid) { return cuentaInstitucional() && request.auth.uid == uid; }
     function esAutor(valor) {
       return autenticado() && (valor == request.auth.uid ||
         valor == /databases/$(database)/documents/usuarios/$(request.auth.uid));
