@@ -9,6 +9,7 @@ import '../../models/favor_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/perfil_service.dart';
 import '../auth/welcome_screen.dart';
+import '../favores/favor_detail_screen.dart';
 
 /// Perfil personal con foto persistida en Cloudinary y datos de Firestore.
 class PerfilScreen extends StatefulWidget {
@@ -630,9 +631,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
           return _tarjeta(
             titulo: 'Favores',
             icono: Icons.history_rounded,
-            child: const Text(
-              'No se pudo cargar el historial ahora.',
-              style: TextStyle(color: _softBlue),
+            child: Column(
+              children: [
+                _vacio('No se pudo cargar el historial ahora.'),
+                TextButton(
+                  onPressed: () => setState(() => _favoresFuture = _perfilService.cargarFavores(uid)),
+                  child: const Text('Reintentar'),
+                ),
+              ],
             ),
           );
         }
@@ -644,6 +650,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
         }
 
         final favores = snapshot.data!;
+        final publicados = favores.where((favor) => favor.esPublicado && favor.idAutor == uid).toList();
         final enCurso = favores
             .where((favor) => favor.estado == 'Aceptado')
             .toList();
@@ -652,6 +659,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
             .toList();
         return Column(
           children: [
+            if (publicados.isNotEmpty) ...[
+              _tarjeta(
+                titulo: 'Mis favores publicados',
+                icono: Icons.campaign_outlined,
+                child: Column(children: publicados.map(_favorFila).toList()),
+              ),
+              const SizedBox(height: 16),
+            ],
             _tarjeta(
               titulo: 'Favores en curso',
               icono: Icons.hourglass_top_rounded,
@@ -675,8 +690,17 @@ class _PerfilScreenState extends State<PerfilScreen> {
 
   Widget _favorFila(FavorModel favor) {
     final fecha = DateFormat('d/MM/yyyy').format(favor.fechaCreacion);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 11),
+    return InkWell(
+      onTap: () async {
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute(builder: (_) => FavorDetailScreen(favorId: favor.id)),
+        );
+        final uid = _uid;
+        if (mounted && uid != null) setState(() => _favoresFuture = _perfilService.cargarFavores(uid));
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           Container(
@@ -717,6 +741,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
           ),
           const Icon(Icons.chevron_right_rounded, color: _softBlue),
         ],
+      ),
       ),
     );
   }
