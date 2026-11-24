@@ -27,6 +27,12 @@ class ArticulosScreen extends ConsumerStatefulWidget {
 class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
   String _tabActiva = 'perdido'; // 'perdido' | 'encontrado' | 'todos'
   String? _borrandoId;
+  bool _buscando = false;
+  String _consulta = '';
+
+  String _normalizar(String valor) => valor.toLowerCase()
+      .replaceAll('á', 'a').replaceAll('é', 'e').replaceAll('í', 'i')
+      .replaceAll('ó', 'o').replaceAll('ú', 'u');
 
   Future<void> _eliminarReporte(ObjetoModel objeto) async {
     if (_borrandoId != null) return;
@@ -63,13 +69,19 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
                 objeto.nombreDueno.trim().toLowerCase() == 'valeria martínez'),
       ),
     ];
-    final objetosFiltrados = _tabActiva == 'todos'
-        ? objetosConMuestras
-        : objetosConMuestras
-              .where((o) => o.tipo.toLowerCase() == _tabActiva)
-              .toList();
+    final palabras = _normalizar(_consulta).split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final objetosFiltrados = objetosConMuestras.where((objeto) {
+      if (_tabActiva != 'todos' && objeto.tipo.toLowerCase() != _tabActiva) return false;
+      final texto = _normalizar([
+        objeto.titulo, objeto.descripcion, objeto.lugarCampus, objeto.dondeQuedo,
+      ].join(' '));
+      return palabras.every(texto.contains);
+    }).toList();
 
     if (objetosFiltrados.isEmpty) {
+      if (palabras.isNotEmpty) {
+        return const Center(child: Text('No hay coincidencias en esta sección.'));
+      }
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -125,7 +137,12 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
                 onPressed: () => Navigator.pop(context),
               )
             : null,
-        title: const Text(
+        title: _buscando ? TextField(
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          decoration: const InputDecoration(hintText: 'Objeto o lugar'),
+          onChanged: (texto) => setState(() => _consulta = texto),
+        ) : const Text(
           'Artículos',
           style: TextStyle(
             color: Color(0xFF1E293B),
@@ -135,9 +152,13 @@ class _ArticulosScreenState extends ConsumerState<ArticulosScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.tune_rounded, color: Color(0xFF1E293B)),
+            tooltip: _buscando ? 'Cerrar búsqueda' : 'Buscar objeto',
+            icon: Icon(_buscando ? Icons.close : Icons.search, color: const Color(0xFF1E293B)),
             onPressed: () {
-              setState(() => _tabActiva = 'todos');
+              setState(() {
+                _buscando = !_buscando;
+                _consulta = '';
+              });
             },
           ),
         ],
