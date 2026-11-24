@@ -19,6 +19,18 @@ function fechaMillis(valor) {
   return typeof valor?.toMillis === "function" ? valor.toMillis() : NaN;
 }
 
+function avisoValido(aviso, idDocumento) {
+  // La cola debe apuntar a documentos individuales, nunca a rutas arbitrarias.
+  const idSimple = (valor) => typeof valor === "string" &&
+    valor.trim().length > 0 && !valor.includes("/") &&
+    valor !== "." && valor !== "..";
+  return !!aviso && /^[a-f0-9]{64}$/.test(idDocumento) &&
+    aviso.id === idDocumento && idSimple(aviso.idFavor) &&
+    idSimple(aviso.idAutor) && Number.isFinite(fechaMillis(aviso.proximoIntento)) &&
+    Number.isSafeInteger(aviso.intentos) && aviso.intentos >= 0 &&
+    aviso.intentos < Number.MAX_SAFE_INTEGER;
+}
+
 function publicadoVencido(favor, ahora) {
   const fecha = fechaMillis(favor?.fechaCreacion);
   return favor?.estado === "Publicado" && !usuarioId(favor.idAyudante) &&
@@ -42,4 +54,4 @@ function avisoVigente(aviso, favor, ahora) {
     eventoId(aviso.idFavor, favor.fechaCreacion) === aviso.id;
 }
 
-module.exports = { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento };
+module.exports = { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento, avisoValido };

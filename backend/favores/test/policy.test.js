@@ -1,10 +1,27 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { DIA, requiereAviso, eventoId, avisoVigente, demoraReintento } = require("../policy");
+const { DIA, requiereAviso, eventoId, avisoVigente, demoraReintento, avisoValido } = require("../policy");
 const ahora = 1800000000000;
 const fecha = (ms, nanos = 0) => ({ seconds: Math.floor(ms / 1000), nanoseconds: nanos, toMillis: () => ms });
 const favor = (cambios = {}) => ({ estado: "Publicado", idAutor: "autor", fechaCreacion: fecha(ahora - DIA), ...cambios });
+
+test("valida la identidad del evento y los datos necesarios para enviar", () => {
+  const id = eventoId("f1", fecha(ahora - DIA));
+  const aviso = { id, idFavor: "f1", idAutor: "autor", intentos: 0, proximoIntento: fecha(ahora) };
+  assert.equal(avisoValido(aviso, id), true);
+  assert.equal(avisoValido(null, id), false);
+  for (const cambios of [
+    { id: "otro" }, { idFavor: "" }, { idFavor: "a/b" },
+    { idAutor: " " }, { idAutor: "usuarios/autor" }, { idAutor: ".." },
+    { proximoIntento: null }, { proximoIntento: "fecha" },
+    { proximoIntento: fecha(NaN) }, { intentos: -1 }, { intentos: 1.5 },
+    { intentos: undefined }, { intentos: Number.MAX_SAFE_INTEGER },
+  ]) {
+    assert.equal(avisoValido({ ...aviso, ...cambios }, id), false);
+  }
+  assert.equal(avisoValido(aviso, "documento-sin-id-de-evento"), false);
+});
 
 test("los reintentos crecen por horas con límite de un día", () => {
   const hora = DIA / 24;

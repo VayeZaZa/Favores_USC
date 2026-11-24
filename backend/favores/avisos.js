@@ -1,7 +1,7 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
-const { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento } = require("./policy");
+const { DIA, usuarioId, requiereAviso, eventoId, avisoVigente, demoraReintento, avisoValido } = require("./policy");
 const HORA = DIA / 24;
 
 async function encolarAvisos(db, Timestamp, ahora) {
@@ -61,8 +61,15 @@ async function enviarAvisos(db, messaging, Timestamp, ahora, logger) {
     const envio = await db.runTransaction(async (tx) => {
       const snapshot = await tx.get(doc.ref);
       const aviso = snapshot.data();
-      if (!aviso || !["Pendiente", "Procesando"].includes(aviso.estado) ||
-          aviso.proximoIntento.toMillis() > ahora) return null;
+      if (!aviso || !["Pendiente", "Procesando"].includes(aviso.estado)) return null;
+      if (!avisoValido(aviso, doc.id)) {
+        tx.update(doc.ref, {
+          estado: "Invalido", ultimoError: "aviso-malformado",
+          fechaRevision: Timestamp.fromMillis(ahora),
+        });
+        return { invalido: true };
+      }
+      if (aviso.proximoIntento.toMillis() > ahora) return null;
       const favorSnap = await tx.get(db.doc(`favores/${aviso.idFavor}`));
       const autorSnap = await tx.get(db.doc(`usuarios/${aviso.idAutor}`));
       if (!favorSnap.exists || !avisoVigente(aviso, favorSnap.data(), ahora)) {
@@ -74,8 +81,7 @@ async function enviarAvisos(db, messaging, Timestamp, ahora, logger) {
         tx.update(doc.ref, { estado: "Pendiente", proximoIntento: Timestamp.fromMillis(ahora + HORA) });
         return null;
       }
-      const intentos = (Number.isSafeInteger(aviso.intentos) && aviso.intentos >= 0
-        ? aviso.intentos : 0) + 1;
+      const intentos = aviso.intentos + 1;
       tx.update(doc.ref, {
         estado: "Procesando", lease, intentos,
         proximoIntento: Timestamp.fromMillis(ahora + 10 * 60 * 1000),
@@ -83,6 +89,13 @@ async function enviarAvisos(db, messaging, Timestamp, ahora, logger) {
       return { aviso, token, intentos };
     });
     if (!envio) continue;
+    if (envio.invalido) {
+      // Fuera de la transacción: los reintentos de Firestore no duplican el log.
+      logger.warn("Alerta de favor apartada por datos inválidos", {
+        eventoId: doc.id, codigo: "aviso-malformado",
+      });
+      continue;
+    }
     let idMensaje;
     try {
       idMensaje = await messaging.send({

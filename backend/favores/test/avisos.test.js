@@ -210,3 +210,62 @@ test("un token inválido no vuelve a intentarse ni altera el perfil", async () =
   assert.equal(aviso.intentos, 1);
   assert.equal(s.registros.get("usuarios/autor").tokenFCM, "token-prueba");
 });
+
+test("un aviso corrupto no bloquea el siguiente aviso válido del lote", async () => {
+  const s = escenario();
+  await encolarAvisos(s.db, Timestamp, ahora);
+  const pathValido = `alertasFavores/${s.id}`;
+  const valido = s.registros.get(pathValido);
+  s.registros.delete(pathValido);
+  const idCorrupto = "a".repeat(64);
+  const pathCorrupto = `alertasFavores/${idCorrupto}`;
+  // Se coloca primero para comprobar que el procesamiento continúa.
+  s.registros.set(pathCorrupto, {
+    ...valido, id: idCorrupto, idFavor: "favores/ruta/no-permitida",
+  });
+  s.registros.set(pathValido, valido);
+  const advertencias = [];
+  const log = { warn: (...args) => advertencias.push(args) };
+  await enviarAvisos(s.db, s.messaging, Timestamp, ahora, log);
+  const corrupto = s.registros.get(pathCorrupto);
+  assert.equal(corrupto.estado, "Invalido");
+  assert.equal(corrupto.ultimoError, "aviso-malformado");
+  assert.equal(corrupto.fechaRevision.toMillis(), ahora);
+  assert.equal(corrupto.intentos, 0);
+  assert.equal(s.registros.get(pathValido).estado, "Enviado");
+  assert.equal(s.enviados.length, 1);
+  assert.equal(advertencias.length, 1);
+  assert.deepEqual(advertencias[0][1], {
+    eventoId: idCorrupto, codigo: "aviso-malformado",
+  });
+  // Ni reenvío ni nuevos avisos de diagnóstico al procesar de nuevo.
+  await enviarAvisos(s.db, s.messaging, Timestamp, ahora + DIA, log);
+  assert.equal(s.enviados.length, 1);
+  assert.equal(advertencias.length, 1);
+  assert.equal(s.registros.get("usuarios/autor").tokenFCM, "token-prueba");
+});
+
+test("una fecha o contador inválido se aparta sin invocar FCM", async () => {
+  for (const cambios of [
+    { proximoIntento: null }, { proximoIntento: "incorrecto" },
+    { intentos: "2" }, { idAutor: null }, { id: "evento-distinto" },
+  ]) {
+    const s = escenario();
+    await encolarAvisos(s.db, Timestamp, ahora);
+    const path = `alertasFavores/${s.id}`;
+    Object.assign(s.registros.get(path), cambios);
+    await enviarAvisos(s.db, s.messaging, Timestamp, ahora, logger);
+    assert.equal(s.registros.get(path).estado, "Invalido");
+    assert.equal(s.enviados.length, 0);
+  }
+});
+
+test("un aviso cuyo favor desapareció se marca obsoleto sin alterar el perfil", async () => {
+  const s = escenario();
+  await encolarAvisos(s.db, Timestamp, ahora);
+  s.registros.delete("favores/f1");
+  await enviarAvisos(s.db, s.messaging, Timestamp, ahora, logger);
+  assert.equal(s.registros.get(`alertasFavores/${s.id}`).estado, "Obsoleto");
+  assert.equal(s.enviados.length, 0);
+  assert.equal(s.registros.get("usuarios/autor").tokenFCM, "token-prueba");
+});
