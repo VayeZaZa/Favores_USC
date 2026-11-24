@@ -35,12 +35,20 @@ void main() {
     expect(() => validar(ubicacion: 'Mi casa'), throwsException);
   });
 
-  test('acepta el pago mínimo y no impone un máximo', () {
+  test('acepta los límites de pago permitidos por Firestore', () {
     expect(() => validar(pago: 999), throwsException);
     expect(() => validar(pago: 1000), returnsNormally);
-    expect(() => validar(pago: 999999999), returnsNormally);
+    expect(() => validar(pago: 10000000), returnsNormally);
+    expect(() => validar(pago: 10000001), throwsException);
     expect(FavorValidators.pago('1.5'), isNotNull);
     expect(FavorValidators.pago('abc'), isNotNull);
+  });
+
+  test('rechaza textos que Firestore no permite guardar', () {
+    expect(() => validar(titulo: 'a' * 200), returnsNormally);
+    expect(() => validar(titulo: 'a' * 201), throwsException);
+    expect(() => validar(descripcion: 'a' * 5000), returnsNormally);
+    expect(() => validar(descripcion: 'a' * 5001), throwsException);
   });
 
   test('acepta fotos opcionales y rechaza más de tres', () {

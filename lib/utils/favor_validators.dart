@@ -13,20 +13,31 @@ class FavorValidators {
     return null;
   }
 
-  static String? titulo(String? valor) => valor == null || valor.trim().isEmpty
-      ? 'Ingresa el título del favor.'
-      : null;
+  // Límites del contrato actual de firestore.rules para documentos de favores.
+  static String? titulo(String? valor) {
+    final texto = valor?.trim() ?? '';
+    if (texto.isEmpty) return 'Ingresa el título del favor.';
+    return texto.length > 200
+        ? 'El título admite máximo 200 caracteres.'
+        : null;
+  }
 
-  static String? descripcion(String? valor) =>
-      valor == null || valor.trim().length < 5
-      ? 'Describe lo que necesitas (mínimo 5 caracteres).'
-      : null;
+  static String? descripcion(String? valor) {
+    final texto = valor?.trim() ?? '';
+    if (texto.length < 5) {
+      return 'Describe lo que necesitas (mínimo 5 caracteres).';
+    }
+    return texto.length > 5000
+        ? 'La descripción admite máximo 5000 caracteres.'
+        : null;
+  }
 
   static String? pago(String? valor) {
     final monto = int.tryParse(valor?.trim() ?? '');
-    return monto == null || monto < AppConstants.minPagoFavor
-        ? 'El pago mínimo es \$${AppConstants.minPagoFavor} COP.'
-        : null;
+    if (monto == null || monto < AppConstants.minPagoFavor) {
+      return 'El pago mínimo es \$${AppConstants.minPagoFavor} COP.';
+    }
+    return monto > 10000000 ? 'El pago máximo es \$10.000.000 COP.' : null;
   }
 
   static String? ubicacion(String? valor) =>

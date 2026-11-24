@@ -58,6 +58,7 @@ class FavorService {
     List<File> imagenesLocales = const [],
   }) async {
     _verificarSesion(idAutor);
+    final imagenes = List<File>.unmodifiable(imagenesLocales);
     FavorValidators.validarPublicacion(
       idAutor: idAutor,
       tituloFavor: titulo,
@@ -65,7 +66,7 @@ class FavorService {
       tipoFavor: tipo,
       ubicacionFavor: ubicacion,
       pagoFavor: pago,
-      cantidadFotos: imagenesLocales.length,
+      cantidadFotos: imagenes.length,
     );
     final perfil = await _usuariosRef.doc(idAutor).get();
     if (!perfil.exists) {
@@ -74,8 +75,8 @@ class FavorService {
     final datosAutor = perfil.data() as Map<String, dynamic>;
     // 4. Subida de imágenes a Cloudinary (máximo 3, RF04)
     List<String> urlFotos = [];
-    if (imagenesLocales.isNotEmpty) {
-      urlFotos = await _cloudinaryService.subirImagenesFavores(imagenesLocales);
+    if (imagenes.isNotEmpty) {
+      urlFotos = await _cloudinaryService.subirImagenesFavores(imagenes);
     }
 
     // 5. Creación del documento en Firestore
@@ -143,6 +144,7 @@ class FavorService {
       if (sala.exists) throw Exception('El favor ya tiene una sala asociada.');
       final autorData = autor.data() as Map<String, dynamic>;
       final ayudanteData = ayudante.data() as Map<String, dynamic>;
+      _verificarSesion(idAyudante);
       tx.update(favorRef, {
         'estado': 'Aceptado',
         'idAyudante': idAyudante,
@@ -216,6 +218,7 @@ class FavorService {
             ids.contains(favor.idAutor) &&
             ids.contains(favor.idAyudante);
       }).toList();
+      _verificarSesion(idUsuario);
       if (!sala.exists && compatibles.isEmpty) {
         tx.set(salaRef, {
           'idReferencia': favorId,
@@ -285,6 +288,7 @@ class FavorService {
       }
       final salaRef = _firestore.collection('chats').doc(chatId(favorId));
       final sala = await tx.get(salaRef);
+      _verificarSesion(idAyudante);
       tx.update(favorRef, {
         'estado': 'Entregado',
         'soloLectura': true,
@@ -398,6 +402,7 @@ class FavorService {
         comentario: comentario.trim(),
         fechaCreacion: DateTime.now(),
       );
+      _verificarSesion(idAutorCalificador);
       tx.set(calificacionRef, {
         ...calificacion.toMap(),
         'fechaCreacion': FieldValue.serverTimestamp(),
@@ -426,6 +431,7 @@ class FavorService {
   }) async {
     _verificarSesion(idReportante);
     if (motivo.trim().isEmpty ||
+        motivo.trim().length > 120 ||
         descripcion.trim().length > 1000 ||
         idReportado.isEmpty ||
         idReportante == idReportado) {
@@ -461,6 +467,7 @@ class FavorService {
         estado: 'Pendiente',
         fechaCreacion: DateTime.now(),
       );
+      _verificarSesion(idReportante);
       tx.set(newDoc, {
         ...reporte.toMap(),
         'fechaCreacion': FieldValue.serverTimestamp(),
@@ -525,6 +532,7 @@ class FavorService {
           'Puedes republicar cuando pasen 24 horas sin ser aceptado.',
         );
       }
+      _verificarSesion(idAutor);
       tx.update(
         favorRef,
         retirar

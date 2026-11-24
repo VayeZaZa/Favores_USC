@@ -28,6 +28,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
   String? _ubicacionSeleccionada;
   final List<File> _imagenesSeleccionadas = [];
   bool _isLoading = false;
+  bool _seleccionandoImagen = false;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -40,6 +41,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
   }
 
   Future<void> _seleccionarImagen() async {
+    if (_isLoading || _seleccionandoImagen) return;
     if (_imagenesSeleccionadas.length >= AppConstants.maxFotosFavor) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -50,6 +52,7 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
       return;
     }
 
+    setState(() => _seleccionandoImagen = true);
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
@@ -76,16 +79,20 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error seleccionando imagen: $e')));
+    } finally {
+      if (mounted) setState(() => _seleccionandoImagen = false);
     }
   }
 
   void _eliminarImagen(int index) {
+    if (_isLoading || _seleccionandoImagen) return;
     setState(() {
       _imagenesSeleccionadas.removeAt(index);
     });
   }
 
   Future<void> _publicarFavor() async {
+    if (_isLoading || _seleccionandoImagen) return;
     if (!_formKey.currentState!.validate()) return;
 
     if (_ubicacionSeleccionada == null) {
@@ -429,7 +436,9 @@ class _CrearFavorScreenState extends ConsumerState<CrearFavorScreen> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _publicarFavor,
+                  onPressed: _isLoading || _seleccionandoImagen
+                      ? null
+                      : _publicarFavor,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryColor,
                     shape: RoundedRectangleBorder(

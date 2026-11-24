@@ -49,6 +49,17 @@ class _Documento implements QueryDocumentSnapshot<Map<String, dynamic>> {
 }
 
 void main() {
+  test('callbacks pendientes no reactivan un feed destruido', () async {
+    final servicio = _ServicioControlado();
+    final feed = FavoresFeedNotifier(servicio);
+    feed.dispose();
+    await feed.cargarInicial();
+    await feed.cargarMas();
+    await feed.cambiarFiltro('Apuntes');
+    servicio.solicitudes.single.complete(_Pagina([]));
+    await Future<void>.delayed(Duration.zero);
+    expect(servicio.solicitudes, hasLength(1));
+  });
   test('un filtro nuevo descarta respuestas antiguas', () async {
     final servicio = _ServicioControlado();
     final feed = FavoresFeedNotifier(servicio);

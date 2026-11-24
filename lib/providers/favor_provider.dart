@@ -83,6 +83,7 @@ class FavoresFeedNotifier extends StateNotifier<FavoresFeedState> {
 
   /// Carga inicial o recarga por pull-to-refresh
   Future<void> cargarInicial() async {
+    if (!mounted) return;
     final generacion = ++_generacion;
     // Una recarga descarta el cursor anterior, incluso si llega una página vacía.
     state = FavoresFeedState(filtroTipo: state.filtroTipo, isLoading: true);
@@ -122,6 +123,7 @@ class FavoresFeedNotifier extends StateNotifier<FavoresFeedState> {
 
   /// Carga la siguiente página de favores (Paginación RNF02)
   Future<void> cargarMas() async {
+    if (!mounted) return;
     if (state.isLoading || !state.hasMore || state.lastDocument == null) return;
     final generacion = _generacion;
 
@@ -165,6 +167,7 @@ class FavoresFeedNotifier extends StateNotifier<FavoresFeedState> {
 
   /// Cambia el filtro por tipo de favor y reinicia la paginación
   Future<void> cambiarFiltro(String nuevoTipo) async {
+    if (!mounted) return;
     if (state.filtroTipo == nuevoTipo) return;
     state = FavoresFeedState(filtroTipo: nuevoTipo);
     await cargarInicial();

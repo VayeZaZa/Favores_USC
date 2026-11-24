@@ -1,8 +1,25 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:favores_usc/config/app_constants.dart';
 import 'package:favores_usc/services/favor_service.dart';
+import 'package:favores_usc/services/cloudinary_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _ImagenesControladas implements CloudinaryService {
+  List<String> recibidas = [];
+
+  @override
+  Future<List<String>> subirImagenesFavores(List<File> imagenes) async {
+    recibidas = imagenes.map((imagen) => imagen.path).toList();
+    return ['https://example.test/foto.jpg'];
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   late FakeFirebaseFirestore db;
@@ -52,6 +69,125 @@ void main() {
       'favoresCompletados': 0,
     });
     await prepararFavor();
+  });
+
+  for (final accion in [
+    'aceptar',
+    'entregar',
+    'calificar',
+    'reportar',
+    'retirar',
+    'republicar',
+    'chat',
+  ]) {
+    test(
+      '$accion no escribe si se cierra la sesión durante la lectura',
+      () async {
+        final estado =
+            accion == 'aceptar' || accion == 'retirar' || accion == 'republicar'
+            ? 'Publicado'
+            : accion == 'entregar'
+            ? 'Aceptado'
+            : 'Entregado';
+        await prepararFavor(estado: estado);
+        sesion = accion == 'aceptar' || accion == 'entregar'
+            ? 'ayudante'
+            : 'autor';
+        final actor = sesion;
+        final antes = (await db.doc('favores/f1').get()).data();
+        servicio = FavorService(
+          firestore: db,
+          usuarioActualId: () {
+            final actual = sesion;
+            scheduleMicrotask(() => sesion = '');
+            return actual;
+          },
+        );
+        final Future<void> operacion;
+        switch (accion) {
+          case 'aceptar':
+            operacion = servicio.aceptarFavor(favorId: 'f1', idAyudante: actor);
+          case 'entregar':
+            operacion = servicio.confirmarPagoYEntregar(
+              favorId: 'f1',
+              idAyudante: actor,
+            );
+          case 'calificar':
+            operacion = calificar();
+          case 'reportar':
+            operacion = servicio.crearReporte(
+              favorId: 'f1',
+              idReportante: actor,
+              idReportado: 'ayudante',
+              motivo: 'Incumplimiento',
+              descripcion: 'Detalles',
+            );
+          case 'retirar':
+            operacion = servicio.retirarFavor('f1', idAutor: actor);
+          case 'republicar':
+            operacion = servicio.republicarFavor('f1', idAutor: actor);
+          default:
+            operacion = servicio.prepararChatFavor('f1', idUsuario: actor);
+        }
+        await expectLater(
+          operacion,
+          throwsA(
+            isA<Exception>().having(
+              (error) => error.toString(),
+              'mensaje',
+              contains('iniciar sesión'),
+            ),
+          ),
+        );
+        expect((await db.doc('favores/f1').get()).data(), antes);
+        for (final coleccion in ['chats', 'calificaciones', 'reportes']) {
+          expect((await db.collection(coleccion).get()).docs, isEmpty);
+        }
+        expect((await db.doc('usuarios/ayudante').get()).data(), {
+          'nombre': 'Ayudante',
+          'favoresCompletados': 0,
+        });
+      },
+    );
+  }
+
+  test('el reporte valida el límite de motivo antes de escribir', () async {
+    Future<void> reportar(String motivo) => servicio.crearReporte(
+      favorId: 'f1',
+      idReportante: sesion,
+      idReportado: 'ayudante',
+      motivo: motivo,
+      descripcion: 'Detalles',
+    );
+    await expectLater(reportar('a' * 121), throwsException);
+    expect((await db.collection('reportes').get()).docs, isEmpty);
+    await reportar('a' * 120);
+    expect((await db.collection('reportes').get()).docs, hasLength(1));
+  });
+
+  test('publicar conserva la selección de fotos con la que comenzó', () async {
+    final imagenes = [File('original.jpg')];
+    final nube = _ImagenesControladas();
+    servicio = FavorService(
+      firestore: db,
+      usuarioActualId: () => sesion,
+      cloudinaryService: nube,
+    );
+    final publicacion = servicio.crearFavor(
+      idAutor: sesion,
+      titulo: 'Copias',
+      tipo: 'Apuntes',
+      descripcion: 'Copias para clase',
+      ubicacion: AppConstants.puntosCampus.first,
+      pago: 1000,
+      imagenesLocales: imagenes,
+    );
+    imagenes.clear();
+    final id = await publicacion;
+    expect(nube.recibidas, ['original.jpg']);
+    expect((await db.doc('favores/$id').get()).get('urlFotos'), [
+      'https://example.test/foto.jpg',
+    ]);
   });
 
   test('la actividad pagina sin incluir favores ajenos', () async {
